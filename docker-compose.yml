@@ -1,0 +1,176 @@
+services:
+
+  # --- Infrastructure ---
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-computer_price}
+      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-computer_price}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
+          --topic raw-prices --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
+          --topic price-changes --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
+          --topic crawl-events --partitions 1 --replication-factor 1 &&
+        echo 'All topics created'
+      "
+    restart: "no"
+
+  # --- Airflow ---
+
+  airflow:
+    build: ./docker/airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./src/airflow_dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-computer_price}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-computer_price}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: airflow-secret-key-change-me
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@local.dev || true &&
+        airflow webserver --port 8080 &
+        airflow scheduler
+      "
+
+  # --- Consumers ---
+
+  change-detector:
+    build: ./docker/consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "src.consumers.change_detector"]
+    volumes:
+      - ./src:/app/src
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-computer_price}
+    restart: unless-stopped
+
+  snowflake-loader:
+    build: ./docker/consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["python", "-m", "src.consumers.snowflake_loader"]
+    volumes:
+      - ./src:/app/src
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
+      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
+      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-COMPUTER_PRICE}
+    restart: unless-stopped
+
+  alert-service:
+    build: ./docker/consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "src.consumers.alert_service"]
+    volumes:
+      - ./src:/app/src
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-computer_price}
+    restart: unless-stopped
+
+  # --- Dashboard ---
+
+  dashboard:
+    build: ./docker/dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./src:/app/src
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-computer_price}
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
+      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
+      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-COMPUTER_PRICE}
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,47 @@
+[project]
+name = "computer-price"
+version = "0.1.0"
+description = "컴퓨터 부품 가격 모니터링 시스템"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "confluent-kafka>=2.3",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "snowflake-connector-python>=3.6",
+    "dash>=2.14",
+    "dash-bootstrap-components>=1.5",
+    "plotly>=5.18",
+    "pandas>=2.1",
+    "pydantic-settings>=2.1",
+    "alembic>=1.13",
+    "rapidfuzz>=3.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "black>=23.12",
+    "ruff>=0.1",
+    "isort>=5.13",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing"
