@@ -82,7 +82,7 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-computer_price}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__WEBSERVER__SECRET_KEY: airflow-secret-key-change-me
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?AIRFLOW_SECRET_KEY must be set in .env}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       POSTGRES_USER: ${POSTGRES_USER:-computer_price}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -91,7 +91,7 @@ services:
       - -c
       - |
         airflow db migrate &&
-        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@local.dev || true &&
+        airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD:?AIRFLOW_ADMIN_PASSWORD must be set in .env} --firstname Admin --lastname User --role Admin --email admin@local.dev || true &&
         airflow webserver --port 8080 &
         airflow scheduler
 
