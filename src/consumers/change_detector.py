@@ -22,10 +22,13 @@ UPSERT_PRODUCT_SQL = text("""
     RETURNING product_id
 """)
 
-SELECT_LATEST_PRICE_FOR_UPDATE_SQL = text("""
+ADVISORY_LOCK_SQL = text("""
+    SELECT pg_advisory_xact_lock(hashtext(:lock_key))
+""")
+
+SELECT_LATEST_PRICE_SQL = text("""
     SELECT price FROM latest_prices
     WHERE product_id = :product_id AND site = :site
-    FOR UPDATE
 """)
 
 UPSERT_LATEST_PRICE_SQL = text("""
@@ -79,8 +82,11 @@ def run() -> None:
                 })
                 product_id = result.scalar_one()
 
-                # Lock row to prevent race condition between SELECT and UPSERT
-                row = session.execute(SELECT_LATEST_PRICE_FOR_UPDATE_SQL, {
+                # Advisory lock: works even when row doesn't exist yet
+                lock_key = f"{product_id}:{raw_price.site}"
+                session.execute(ADVISORY_LOCK_SQL, {"lock_key": lock_key})
+
+                row = session.execute(SELECT_LATEST_PRICE_SQL, {
                     "product_id": product_id,
                     "site": raw_price.site,
                 }).fetchone()
