@@ -6,12 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
-    beautifulsoup4>=4.12 \
-    requests>=2.31 \
-    confluent-kafka>=2.3 \
-    pydantic-settings>=2.1 \
-    rapidfuzz>=3.5
+COPY pyproject.toml .
+RUN pip install --no-cache-dir .
 
 COPY src/ src/
 
