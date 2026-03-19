@@ -52,52 +52,55 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    command: >
-      bash -c "
-        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
-          --topic raw-prices --partitions 3 --replication-factor 1 &&
-        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
-          --topic price-changes --partitions 6 --replication-factor 1 &&
-        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092
-          --topic crawl-events --partitions 1 --replication-factor 1 &&
+    command:
+      - bash
+      - -c
+      - |
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic raw-prices --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic price-changes --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic crawl-events --partitions 1 --replication-factor 1 &&
         echo 'All topics created'
-      "
     restart: "no"
 
   # --- Airflow ---
 
   airflow:
-    build: ./docker/airflow
+    build:
+      context: .
+      dockerfile: docker/airflow/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8081:8080"
     volumes:
       - ./src/airflow_dags:/opt/airflow/dags
       - ./src:/opt/airflow/src
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-computer_price}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-computer_price}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-computer_price}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: airflow-secret-key-change-me
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       POSTGRES_USER: ${POSTGRES_USER:-computer_price}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-    command: >
-      bash -c "
+    command:
+      - bash
+      - -c
+      - |
         airflow db migrate &&
         airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@local.dev || true &&
         airflow webserver --port 8080 &
         airflow scheduler
-      "
 
   # --- Consumers ---
 
   change-detector:
-    build: ./docker/consumer
+    build:
+      context: .
+      dockerfile: docker/consumer/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -115,7 +118,9 @@ services:
     restart: unless-stopped
 
   snowflake-loader:
-    build: ./docker/consumer
+    build:
+      context: .
+      dockerfile: docker/consumer/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -132,7 +137,9 @@ services:
     restart: unless-stopped
 
   alert-service:
-    build: ./docker/consumer
+    build:
+      context: .
+      dockerfile: docker/consumer/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -152,7 +159,9 @@ services:
   # --- Dashboard ---
 
   dashboard:
-    build: ./docker/dashboard
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
