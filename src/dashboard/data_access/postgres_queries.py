@@ -1,8 +1,20 @@
 """PostgreSQL read queries for dashboard."""
 
+import uuid as _uuid
+
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+MAX_HISTORY_DAYS = 365
+
+
+def _validate_uuid(value: str) -> str:
+    try:
+        _uuid.UUID(value)
+    except ValueError:
+        raise ValueError(f"Invalid UUID: {value}") from None
+    return value
 
 
 def get_product_list(session: Session, category: str | None = None) -> pd.DataFrame:
@@ -16,6 +28,7 @@ def get_product_list(session: Session, category: str | None = None) -> pd.DataFr
 
 
 def get_latest_prices(session: Session, product_id: str) -> pd.DataFrame:
+    _validate_uuid(product_id)
     sql = """
         SELECT lp.site, lp.price, lp.url, lp.crawled_at, p.name
         FROM latest_prices lp
@@ -57,14 +70,18 @@ def get_summary_stats(session: Session) -> dict:
     """))
     row = result.fetchone()
     return {
-        "total_products": row[0],
-        "active_alerts": row[1],
-        "changes_today": row[2],
-        "new_lows": row[3],
+        "total_products": row.total_products,
+        "active_alerts": row.active_alerts,
+        "changes_today": row.changes_today,
+        "new_lows": row.new_lows,
     }
 
 
 def get_price_history(session: Session, product_id: str, days: int = 30) -> pd.DataFrame:
+    _validate_uuid(product_id)
+    if not 1 <= days <= MAX_HISTORY_DAYS:
+        raise ValueError(f"days must be between 1 and {MAX_HISTORY_DAYS}")
+
     sql = """
         SELECT site, price, crawled_at
         FROM price_history
