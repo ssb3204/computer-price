@@ -16,21 +16,31 @@ from src.common.serialization import deserialize_raw_price, serialize
 logger = logging.getLogger(__name__)
 
 UPSERT_PRODUCT_SQL = text("""
-    INSERT INTO products (product_id, name, category, brand, normalized_name, created_at, updated_at)
-    VALUES (:product_id, :name, :category, :brand, :normalized_name, NOW(), NOW())
+    INSERT INTO products (name, category, brand, normalized_name, created_at, updated_at)
+    VALUES (:name, :category, :brand, :normalized_name, NOW(), NOW())
     ON CONFLICT (normalized_name) DO UPDATE SET updated_at = NOW()
     RETURNING product_id
 """)
 
+ADVISORY_LOCK_SQL = text("""
+    SELECT pg_advisory_xact_lock(hashtext(:lock_key))
+""")
+
 SELECT_LATEST_PRICE_SQL = text("""
-    SELECT price FROM latest_prices WHERE product_id = :product_id AND site = :site
+    SELECT price FROM latest_prices
+    WHERE product_id = :product_id AND site = :site
 """)
 
 UPSERT_LATEST_PRICE_SQL = text("""
     INSERT INTO latest_prices (product_id, site, price, url, crawled_at)
     VALUES (:product_id, :site, :price, :url, :crawled_at)
     ON CONFLICT (product_id, site) DO UPDATE
-    SET price = :price, url = :url, crawled_at = :crawled_at
+    SET price = EXCLUDED.price, url = EXCLUDED.url, crawled_at = EXCLUDED.crawled_at
+""")
+
+INSERT_PRICE_HISTORY_SQL = text("""
+    INSERT INTO price_history (product_id, site, price, url, crawled_at)
+    VALUES (:product_id, :site, :price, :url, :crawled_at)
 """)
 
 
@@ -65,13 +75,16 @@ def run() -> None:
             with get_session(session_factory) as session:
                 normalized = _normalize(raw_price.product_name)
                 result = session.execute(UPSERT_PRODUCT_SQL, {
-                    "product_id": str(uuid.uuid4()),
                     "name": raw_price.product_name,
                     "category": raw_price.category,
                     "brand": raw_price.brand,
                     "normalized_name": normalized,
                 })
                 product_id = result.scalar_one()
+
+                # Advisory lock: works even when row doesn't exist yet
+                lock_key = f"{product_id}:{raw_price.site}"
+                session.execute(ADVISORY_LOCK_SQL, {"lock_key": lock_key})
 
                 row = session.execute(SELECT_LATEST_PRICE_SQL, {
                     "product_id": product_id,
@@ -111,13 +124,15 @@ def run() -> None:
                     )
                     producer.flush()
 
-                session.execute(UPSERT_LATEST_PRICE_SQL, {
+                upsert_params = {
                     "product_id": product_id,
                     "site": raw_price.site,
                     "price": raw_price.price,
                     "url": raw_price.url,
                     "crawled_at": raw_price.crawled_at,
-                })
+                }
+                session.execute(UPSERT_LATEST_PRICE_SQL, upsert_params)
+                session.execute(INSERT_PRICE_HISTORY_SQL, upsert_params)
 
             consumer.commit(msg)
     except KeyboardInterrupt:

@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER airflow
 
 COPY pyproject.toml /opt/airflow/
-RUN pip install --no-cache-dir /opt/airflow/
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir /opt/airflow/
 
 COPY src/ /opt/airflow/src/
