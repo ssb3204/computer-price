@@ -16,21 +16,28 @@ from src.common.serialization import deserialize_raw_price, serialize
 logger = logging.getLogger(__name__)
 
 UPSERT_PRODUCT_SQL = text("""
-    INSERT INTO products (product_id, name, category, brand, normalized_name, created_at, updated_at)
-    VALUES (:product_id, :name, :category, :brand, :normalized_name, NOW(), NOW())
+    INSERT INTO products (name, category, brand, normalized_name, created_at, updated_at)
+    VALUES (:name, :category, :brand, :normalized_name, NOW(), NOW())
     ON CONFLICT (normalized_name) DO UPDATE SET updated_at = NOW()
     RETURNING product_id
 """)
 
-SELECT_LATEST_PRICE_SQL = text("""
-    SELECT price FROM latest_prices WHERE product_id = :product_id AND site = :site
+SELECT_LATEST_PRICE_FOR_UPDATE_SQL = text("""
+    SELECT price FROM latest_prices
+    WHERE product_id = :product_id AND site = :site
+    FOR UPDATE
 """)
 
 UPSERT_LATEST_PRICE_SQL = text("""
     INSERT INTO latest_prices (product_id, site, price, url, crawled_at)
     VALUES (:product_id, :site, :price, :url, :crawled_at)
     ON CONFLICT (product_id, site) DO UPDATE
-    SET price = :price, url = :url, crawled_at = :crawled_at
+    SET price = EXCLUDED.price, url = EXCLUDED.url, crawled_at = EXCLUDED.crawled_at
+""")
+
+INSERT_PRICE_HISTORY_SQL = text("""
+    INSERT INTO price_history (product_id, site, price, url, crawled_at)
+    VALUES (:product_id, :site, :price, :url, :crawled_at)
 """)
 
 
@@ -65,7 +72,6 @@ def run() -> None:
             with get_session(session_factory) as session:
                 normalized = _normalize(raw_price.product_name)
                 result = session.execute(UPSERT_PRODUCT_SQL, {
-                    "product_id": str(uuid.uuid4()),
                     "name": raw_price.product_name,
                     "category": raw_price.category,
                     "brand": raw_price.brand,
@@ -73,7 +79,8 @@ def run() -> None:
                 })
                 product_id = result.scalar_one()
 
-                row = session.execute(SELECT_LATEST_PRICE_SQL, {
+                # Lock row to prevent race condition between SELECT and UPSERT
+                row = session.execute(SELECT_LATEST_PRICE_FOR_UPDATE_SQL, {
                     "product_id": product_id,
                     "site": raw_price.site,
                 }).fetchone()
@@ -111,13 +118,15 @@ def run() -> None:
                     )
                     producer.flush()
 
-                session.execute(UPSERT_LATEST_PRICE_SQL, {
+                upsert_params = {
                     "product_id": product_id,
                     "site": raw_price.site,
                     "price": raw_price.price,
                     "url": raw_price.url,
                     "crawled_at": raw_price.crawled_at,
-                })
+                }
+                session.execute(UPSERT_LATEST_PRICE_SQL, upsert_params)
+                session.execute(INSERT_PRICE_HISTORY_SQL, upsert_params)
 
             consumer.commit(msg)
     except KeyboardInterrupt:
