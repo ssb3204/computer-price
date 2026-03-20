@@ -1,20 +1,40 @@
-"""Crawler for compuzone.co.kr."""
+"""Crawler for compuzone.co.kr — AJAX POST-based product list.
 
+Compuzone loads product data via POST to product_list.php.
+Each category returns up to 20 items per page (ScrollPage).
+We take top-N from each category sorted by recommendation.
+"""
+
+import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 
 from src.common.models import RawPrice
 from src.crawlers.base import BaseCrawler
-from src.crawlers.parser_utils import classify_category, normalize_product_name, parse_korean_price
+from src.crawlers.parser_utils import parse_korean_price
 
-COMPUZONE_CATEGORIES: dict[str, str] = {
-    "CPU": "CPU",
-    "GPU": "VGA",
-    "RAM": "RAM",
-    "SSD": "SSD",
-    "Mainboard": "M/B",
-}
+logger = logging.getLogger(__name__)
+
+LIST_URL = "https://www.compuzone.co.kr/product/product_list.php"
+DETAIL_BASE = "https://www.compuzone.co.kr/product/product_detail.htm"
+
+
+@dataclass(frozen=True)
+class TargetCategory:
+    """A compuzone category to crawl top-N products from."""
+    medium_div_no: str
+    category: str
+    top_n: int
+
+
+CATEGORY_TARGETS: tuple[TargetCategory, ...] = (
+    TargetCategory(medium_div_no="1012", category="CPU", top_n=3),
+    TargetCategory(medium_div_no="1016", category="GPU", top_n=3),
+    TargetCategory(medium_div_no="1014", category="RAM", top_n=3),
+    TargetCategory(medium_div_no="1276", category="SSD", top_n=3),
+)
 
 
 class CompuzoneCrawler(BaseCrawler):
@@ -23,47 +43,101 @@ class CompuzoneCrawler(BaseCrawler):
         return "compuzone"
 
     def get_target_urls(self) -> list[str]:
-        urls = []
-        for cat_code in COMPUZONE_CATEGORIES.values():
-            for page in range(1, 4):
-                urls.append(
-                    f"https://www.compuzone.co.kr/product/product_list.htm?BigDivCode=PMB&MedijDivCode={cat_code}&page={page}"
-                )
-        return urls
+        """Not used directly — crawl() is overridden."""
+        return [LIST_URL]
 
     def parse_page(self, html: str, url: str) -> list[RawPrice]:
+        """Fallback: not used directly since crawl() is overridden."""
+        return self._parse_list_html(html, category="Unknown", top_n=20)
+
+    def crawl(self) -> list[RawPrice]:
+        """Override base crawl to use POST requests per category."""
+        all_prices: list[RawPrice] = []
+
+        for target in CATEGORY_TARGETS:
+            prices = self._crawl_category(target)
+            all_prices.extend(prices)
+
+        logger.info("Crawled %d total prices from %s", len(all_prices), self.site_name)
+        return all_prices
+
+    def _crawl_category(self, target: TargetCategory) -> list[RawPrice]:
+        """Fetch one category page via POST and extract top-N products."""
+        self._rate_limit()
+
+        form_data = {
+            "actype": "getList",
+            "BigDivNo": "4",
+            "MediumDivNo": target.medium_div_no,
+            "DivNo": "0",
+            "PageCount": "20",
+            "StartNum": "0",
+            "PageNum": "1",
+            "PreOrder": "recommand",
+            "lvm": "L",
+            "ps_po": "P",
+            "ScrollPage": "1",
+            "ProductType": "list",
+            "PageType": "ProductList",
+            "setPricechk": "N",
+        }
+
+        try:
+            resp = self._session.post(LIST_URL, data=form_data, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = "euc-kr"
+        except Exception:
+            logger.exception("Failed to fetch %s category %s", self.site_name, target.category)
+            return []
+
+        return self._parse_list_html(resp.text, target.category, target.top_n)
+
+    def _parse_list_html(self, html: str, category: str, top_n: int) -> list[RawPrice]:
+        """Parse product list HTML and return top-N RawPrice items."""
         soup = BeautifulSoup(html, "html.parser")
-        prices: list[RawPrice] = []
         now = datetime.now(timezone.utc)
+        prices: list[RawPrice] = []
 
-        product_items = soup.select(".product-list .item, .prod_list li, .product_wrap .product_item")
+        for item in soup.select("li.li-obj"):
+            if len(prices) >= top_n:
+                break
 
-        for item in product_items:
-            name_el = item.select_one(".prd_name a, .prod_name a, .item_name a")
-            price_el = item.select_one(".prd_price strong, .price em, .item_price strong")
+            name_tag = item.select_one("a.prd_info_name")
+            if not name_tag:
+                continue
+            name = name_tag.get_text(strip=True)
 
-            if not name_el or not price_el:
+            price_div = item.select_one("div.prd_price")
+            if not price_div:
+                continue
+            raw_price = price_div.get("data-price")
+            if not raw_price:
+                continue
+            price = parse_korean_price(raw_price)
+            if price is None:
                 continue
 
-            name = name_el.get_text(strip=True)
-            price_val = parse_korean_price(price_el.get_text(strip=True))
-
-            if not name or price_val is None:
-                continue
-
-            link = name_el.get("href", "")
+            # Product number from li id (e.g. "li-pno-1187400")
+            pno = item.get("id", "").replace("li-pno-", "")
             product_url = (
-                f"https://www.compuzone.co.kr{link}" if link.startswith("/") else link
+                f"{DETAIL_BASE}?ProductNo={pno}&BigDivNo=4&MediumDivNo="
+                if pno else ""
             )
 
             prices.append(RawPrice(
                 product_name=name,
-                category=classify_category(name),
+                category=category,
                 brand=None,
                 site="compuzone",
-                price=price_val,
+                price=price,
                 url=product_url,
                 crawled_at=now,
             ))
+            logger.info("Found %s #%d: %s = %d원", category, len(prices), name[:40], price)
 
+        if len(prices) < top_n:
+            logger.warning(
+                "Only found %d/%d products for %s",
+                len(prices), top_n, category,
+            )
         return prices

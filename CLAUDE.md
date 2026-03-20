@@ -1,0 +1,70 @@
+# 컴퓨터 가격 모니터링 시스템
+
+## 프로젝트 개요
+컴퓨터 부품 가격 비교 사이트 3곳(다나와, 컴퓨존, 견적왕)을 크롤링하여 일일 가격을 수집하고, 가격 변동을 시각화하는 웹 대시보드. 로컬 Docker Compose로 운영.
+
+## 기술 스택
+- Python 3.11+, BeautifulSoup (크롤링)
+- Apache Airflow (오케스트레이션, 매일 06:00 KST)
+- Apache Kafka (변경분만 전달: raw-prices → price-changes)
+- PostgreSQL 16 (운영 DB)
+- Snowflake (DWH, 추후 연결)
+- Dash/Plotly (웹 대시보드)
+- Docker Compose (9개 서비스)
+
+## 데이터 흐름
+```
+크롤러 → Kafka[raw-prices] → change-detector → PostgreSQL + Kafka[price-changes]
+                                                     ↓
+                                              alert-service → alerts
+                                              snowflake-loader → Snowflake
+                                              dashboard ← PostgreSQL
+```
+
+## 프로젝트 구조
+```
+src/
+├── common/          # models, config, db, kafka_client, serialization, snowflake_client
+├── crawlers/        # base.py, danawa.py(완성), compuzone.py(미완성), pc_estimate.py(미완성)
+├── consumers/       # change_detector, alert_service, snowflake_loader
+├── dashboard/       # Dash 앱, postgres_queries
+└── airflow_dags/    # crawl_dag.py
+```
+
+## 개발 규칙
+- 한번에 전부 만들지 않음. 단계별로 나눠서 각 단계마다 테스트 후 진행
+- **최하위(기초) 기능부터 구현/테스트 → 정상 확인 후 다음 단계로 진행**
+  - 여러 기능이 있으면 가장 기초가 되는 부분을 먼저 만들고, 동작 확인 후 상위 기능으로 올라감
+  - 오류 발생 시 반드시 해결하고 나서 다음 단계로 넘어감
+  - 처음부터 큰 덩어리로 작업하지 않음 — 소분류로 나눠서 진행 현황을 명확히 파악
+- Git: feature branch → PR → code review → merge
+- 커밋은 관련있는 것끼리 분리
+- Co-Authored-By 추가하지 않음
+- 테스트: `python -m pytest tests/ -v -o "addopts="` (pytest-cov 미설치 시)
+
+## 기술적 주의사항
+- PostgreSQL: advisory lock 사용 (pg_advisory_xact_lock) — SELECT FOR UPDATE로는 없는 행 잠금 불가
+- SQLAlchemy 2.x: session.bind 대신 session.connection()
+- 다나와 크롤러: productItem* = 실제상품, adReaderProductItem*/adPointProductItem* = 광고
+- Frozen dataclass로 모든 DTO 정의
+- Kafka idempotent producer
+
+## Docker 서비스
+| 서비스 | 포트 |
+|--------|------|
+| Dashboard | localhost:8050 |
+| Airflow | localhost:8081 |
+| PostgreSQL | localhost:5432 |
+| Kafka | localhost:29092 |
+
+## 실행
+```bash
+docker compose up -d
+# Airflow DB 초기화 (최초 1회)
+docker compose run --rm airflow bash -c "airflow db init"
+docker compose restart airflow
+# PostgreSQL 스키마
+docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/001_initial_schema.sql
+docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/002_index_and_constraint_fixes.sql
+docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/003_price_history_site_constraint.sql
+```
