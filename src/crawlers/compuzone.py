@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 
-from src.common.models import RawPrice
+from src.common.models import RawCrawledPrice, RawPrice
 from src.crawlers.base import BaseCrawler
 from src.crawlers.parser_utils import parse_korean_price
 
@@ -60,6 +60,62 @@ class CompuzoneCrawler(BaseCrawler):
 
         logger.info("Crawled %d total prices from %s", len(all_prices), self.site_name)
         return all_prices
+
+    def crawl_raw(self) -> list[RawCrawledPrice]:
+        """Raw 데이터 수집 — 가격을 원본 텍스트로 보존."""
+        all_raw: list[RawCrawledPrice] = []
+
+        for target in CATEGORY_TARGETS:
+            self._rate_limit()
+            form_data = {
+                "actype": "getList", "BigDivNo": "4",
+                "MediumDivNo": target.medium_div_no, "DivNo": "0",
+                "PageCount": "20", "StartNum": "0", "PageNum": "1",
+                "PreOrder": "recommand", "lvm": "L", "ps_po": "P",
+                "ScrollPage": "1", "ProductType": "list",
+                "PageType": "ProductList", "setPricechk": "N",
+            }
+            try:
+                resp = self._session.post(LIST_URL, data=form_data, timeout=30)
+                resp.raise_for_status()
+                resp.encoding = "euc-kr"
+            except Exception:
+                logger.exception("Failed to fetch %s category %s", self.site_name, target.category)
+                continue
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            now = datetime.now(timezone.utc)
+            count = 0
+
+            for item in soup.select("li.li-obj"):
+                if count >= target.top_n:
+                    break
+                name_tag = item.select_one("a.prd_info_name")
+                if not name_tag:
+                    continue
+                price_div = item.select_one("div.prd_price")
+                if not price_div:
+                    continue
+                raw_price = price_div.get("data-price")
+                if not raw_price:
+                    continue
+
+                pno = item.get("id", "").replace("li-pno-", "")
+                product_url = (
+                    f"{DETAIL_BASE}?ProductNo={pno}&BigDivNo=4&MediumDivNo="
+                    if pno else ""
+                )
+                all_raw.append(RawCrawledPrice(
+                    site="compuzone", category=target.category,
+                    product_name=name_tag.get_text(strip=True),
+                    price_text=raw_price,
+                    brand=None, url=product_url,
+                    stock_status=None, crawled_at=now,
+                ))
+                count += 1
+
+        logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
+        return all_raw
 
     def _crawl_category(self, target: TargetCategory) -> list[RawPrice]:
         """Fetch one category page via POST and extract top-N products."""

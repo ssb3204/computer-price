@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 import requests
 
-from src.common.models import RawPrice
+from src.common.models import RawCrawledPrice, RawPrice
 
 logger = logging.getLogger(__name__)
 
