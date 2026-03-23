@@ -94,6 +94,120 @@ def get_product_stats(conn: SnowflakeConnection) -> pd.DataFrame:
         cur.close()
 
 
+def get_price_trend(
+    conn: SnowflakeConnection,
+    category: str | None = None,
+    search: str | None = None,
+    days: int = 7,
+) -> pd.DataFrame:
+    """검색 키워드 매칭 상품의 사이트별 최저가 추이 (라인 차트용).
+
+    같은 사이트에 여러 매칭 상품이 있으면 크롤 시점별 최저가만 반환.
+    """
+    if not search:
+        return pd.DataFrame()
+
+    conditions = ["dp.CRAWLED_AT >= DATEADD(day, -%s, CURRENT_TIMESTAMP())"]
+    params: list = [days]
+
+    if category and category != "ALL":
+        conditions.append("c.NAME = %s")
+        params.append(category)
+
+    conditions.append("p.NAME ILIKE %s")
+    params.append(f"%{search}%")
+
+    where = " AND ".join(conditions)
+
+    sql = f"""
+        SELECT
+            s.DISPLAY_NAME AS site,
+            dp.CRAWLED_AT   AS crawled_at,
+            MIN(dp.PRICE)   AS price
+        FROM STAGING.STG_DAILY_PRICES dp
+        JOIN STAGING.STG_PRODUCTS   p ON p.PRODUCT_ID  = dp.PRODUCT_ID
+        JOIN STAGING.DIM_SITES      s ON s.SITE_ID     = p.SITE_ID
+        JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
+        WHERE {where}
+        GROUP BY s.DISPLAY_NAME, dp.CRAWLED_AT
+        ORDER BY dp.CRAWLED_AT
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql, params)
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
+def get_today_crawl_comparison(
+    conn: SnowflakeConnection,
+    category: str | None = None,
+    search: str | None = None,
+) -> pd.DataFrame:
+    """오늘 크롤링 2회(1차/2차) 가격 비교."""
+    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()"]
+    params: list = []
+
+    if category and category != "ALL":
+        conditions.append("c.NAME = %s")
+        params.append(category)
+    if search:
+        conditions.append("p.NAME ILIKE %s")
+        params.append(f"%{search}%")
+
+    where = " AND ".join(conditions)
+
+    sql = f"""
+        WITH daily AS (
+            SELECT
+                dp.PRODUCT_ID,
+                dp.PRICE,
+                dp.CRAWLED_AT,
+                ROW_NUMBER() OVER (
+                    PARTITION BY dp.PRODUCT_ID
+                    ORDER BY dp.CRAWLED_AT
+                ) AS rn
+            FROM STAGING.STG_DAILY_PRICES dp
+            JOIN STAGING.STG_PRODUCTS   p ON p.PRODUCT_ID  = dp.PRODUCT_ID
+            JOIN STAGING.DIM_SITES      s ON s.SITE_ID     = p.SITE_ID
+            JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
+            WHERE {where}
+        )
+        SELECT
+            s.DISPLAY_NAME           AS site,
+            c.NAME                   AS category,
+            p.NAME                   AS product_name,
+            d1.PRICE                 AS price_1st,
+            d2.PRICE                 AS price_2nd,
+            COALESCE(d2.PRICE - d1.PRICE, 0) AS price_diff,
+            CASE
+                WHEN d2.PRICE IS NULL          THEN '1회만'
+                WHEN d2.PRICE > d1.PRICE       THEN '▲ 상승'
+                WHEN d2.PRICE < d1.PRICE       THEN '▼ 하락'
+                ELSE '- 유지'
+            END AS change_status
+        FROM daily d1
+        LEFT JOIN daily d2
+            ON d1.PRODUCT_ID = d2.PRODUCT_ID AND d2.rn = 2
+        JOIN STAGING.STG_PRODUCTS   p ON p.PRODUCT_ID  = d1.PRODUCT_ID
+        JOIN STAGING.DIM_SITES      s ON s.SITE_ID     = p.SITE_ID
+        JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
+        WHERE d1.rn = 1
+        ORDER BY c.NAME, p.NAME
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql, params)
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
 def get_category_price_summary(conn: SnowflakeConnection) -> pd.DataFrame:
     """카테고리별 가격 요약."""
     sql = """

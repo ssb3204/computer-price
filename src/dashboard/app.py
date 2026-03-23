@@ -8,6 +8,8 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 import dash
 import dash_bootstrap_components as dbc
+import plotly.express as px
+import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
@@ -16,8 +18,10 @@ from src.common.snowflake_client import get_connection
 from src.dashboard.data_access.snowflake_queries import (
     get_category_price_summary,
     get_latest_prices_all,
+    get_price_trend,
     get_product_stats,
     get_summary_stats,
+    get_today_crawl_comparison,
 )
 
 app = dash.Dash(
@@ -122,6 +126,7 @@ app.layout = dbc.Container([
                 dbc.NavLink("전체 가격표", href="/prices", active="exact"),
                 dbc.NavLink("카테고리 요약", href="/categories", active="exact"),
                 dbc.NavLink("상품 통계", href="/stats", active="exact"),
+                dbc.NavLink("가격 추이", href="/trends", active="exact"),
             ], vertical=True, pills=True),
         ], width=2, className="bg-dark vh-100 pt-3 position-fixed",
            style={"overflowY": "auto"}),
@@ -200,6 +205,64 @@ def stats_page():
     ])
 
 
+def trends_page():
+    return html.Div([
+        html.H2("가격 추이", className="mb-4"),
+
+        # ── Filters ──
+        dbc.Row([
+            dbc.Col([
+                html.Label("카테고리"),
+                dcc.Dropdown(
+                    id="trend-category-filter",
+                    options=[{"label": "전체", "value": "ALL"}] + [
+                        {"label": c, "value": c} for c in ["CPU", "GPU", "RAM", "SSD"]
+                    ],
+                    value="ALL",
+                ),
+            ], width=2),
+            dbc.Col([
+                html.Label("상품 검색 (예: 9070 XT, 7800X3D)"),
+                dcc.Input(
+                    id="trend-search-input",
+                    type="text",
+                    placeholder="검색어 입력 후 Enter",
+                    debounce=True,
+                    className="form-control",
+                ),
+            ], width=4),
+            dbc.Col([
+                html.Label("기간"),
+                dcc.Dropdown(
+                    id="trend-period",
+                    options=[
+                        {"label": "7일", "value": 7},
+                        {"label": "14일", "value": 14},
+                        {"label": "30일", "value": 30},
+                    ],
+                    value=7,
+                ),
+            ], width=2),
+        ], className="mb-4"),
+
+        # ── Line Chart ──
+        dbc.Row([
+            dbc.Col(dcc.Graph(id="trend-chart"), width=12),
+        ], className="mb-4"),
+
+        # ── Weekly Summary Cards ──
+        dbc.Row(id="trend-summary", className="mb-4"),
+
+        # ── Today Crawl Comparison ──
+        dbc.Row([
+            dbc.Col([
+                html.H5("오늘 크롤링 비교 (1차 vs 2차)", className="mb-3"),
+                html.Div(id="today-comparison-table"),
+            ], width=12),
+        ]),
+    ])
+
+
 @app.callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
     if pathname == "/prices":
@@ -208,6 +271,8 @@ def display_page(pathname):
         return categories_page()
     if pathname == "/stats":
         return stats_page()
+    if pathname == "/trends":
+        return trends_page()
     return overview_page()
 
 
@@ -312,6 +377,148 @@ def update_stats(_):
         df = get_product_stats(conn)
 
     return _make_stats_table(df)
+
+
+# ── Callbacks: Trends ──
+
+SITE_COLORS = {"다나와": "#3498db", "컴퓨존": "#e67e22", "견적왕": "#2ecc71"}
+
+
+def _empty_chart(message: str) -> go.Figure:
+    """빈 차트에 안내 메시지 표시."""
+    fig = go.Figure()
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        annotations=[{
+            "text": message,
+            "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5,
+            "showarrow": False,
+            "font": {"size": 16, "color": "#aaa"},
+        }],
+    )
+    return fig
+
+
+@app.callback(
+    [Output("trend-chart", "figure"),
+     Output("trend-summary", "children")],
+    [Input("trend-category-filter", "value"),
+     Input("trend-search-input", "value"),
+     Input("trend-period", "value")],
+)
+def update_trend_chart(category, search, days):
+    if not search:
+        return _empty_chart("검색어를 입력하면 사이트별 가격 추이를 볼 수 있습니다"), []
+
+    days = days or 7
+    with _get_conn() as conn:
+        df = get_price_trend(conn, category=category, search=search, days=days)
+
+    if df.empty:
+        return _empty_chart(f'"{search}" 검색 결과 없음'), []
+
+    # ── Line Chart ──
+    fig = px.line(
+        df, x="crawled_at", y="price", color="site",
+        color_discrete_map=SITE_COLORS,
+        markers=True,
+        labels={"crawled_at": "시간", "price": "가격 (원)", "site": "사이트"},
+        title=f'"{search}" 사이트별 최저가 추이',
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        hovermode="x unified",
+        legend={"orientation": "h", "y": -0.15},
+    )
+    fig.update_yaxes(tickformat=",", title="가격 (원)")
+    fig.update_xaxes(title="")
+
+    # ── Summary Cards ──
+    week_low = int(df["price"].min())
+    week_high = int(df["price"].max())
+    low_site = df.loc[df["price"].idxmin(), "site"]
+    high_site = df.loc[df["price"].idxmax(), "site"]
+    num_sites = df["site"].nunique()
+
+    cards = [
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H6("최저가", className="card-subtitle text-muted"),
+            html.H3(f"{week_low:,}원", className="text-success"),
+            html.Small(low_site, className="text-muted"),
+        ]), color="dark"), width=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H6("최고가", className="card-subtitle text-muted"),
+            html.H3(f"{week_high:,}원", className="text-danger"),
+            html.Small(high_site, className="text-muted"),
+        ]), color="dark"), width=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H6("가격차", className="card-subtitle text-muted"),
+            html.H3(f"{week_high - week_low:,}원"),
+            html.Small(f"{num_sites}개 사이트 비교", className="text-muted"),
+        ]), color="dark"), width=3),
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.H6("데이터 포인트", className="card-subtitle text-muted"),
+            html.H3(f"{len(df)}건"),
+            html.Small(f"최근 {days}일", className="text-muted"),
+        ]), color="dark"), width=3),
+    ]
+
+    return fig, cards
+
+
+@app.callback(
+    Output("today-comparison-table", "children"),
+    [Input("trend-category-filter", "value"),
+     Input("trend-search-input", "value")],
+)
+def update_today_comparison(category, search):
+    with _get_conn() as conn:
+        df = get_today_crawl_comparison(conn, category=category, search=search)
+
+    if df.empty:
+        return html.P("오늘 크롤링 데이터 없음", className="text-muted")
+
+    header = html.Thead(html.Tr([
+        html.Th("사이트"), html.Th("카테고리"), html.Th("상품명"),
+        html.Th("1차 가격"), html.Th("2차 가격"),
+        html.Th("변동"), html.Th("상태"),
+    ]))
+
+    body_rows = []
+    for _, row in df.iterrows():
+        price_1st = f"{int(row['price_1st']):,}원"
+        price_2nd = f"{int(row['price_2nd']):,}원" if row["price_2nd"] else "-"
+        diff = int(row["price_diff"])
+        diff_text = f"{diff:+,}원" if diff != 0 else "0원"
+        status = str(row["change_status"])
+
+        # 상태별 색상
+        if "상승" in status:
+            status_class = "text-danger"
+        elif "하락" in status:
+            status_class = "text-success"
+        else:
+            status_class = "text-muted"
+
+        body_rows.append(html.Tr([
+            html.Td(row["site"]),
+            html.Td(row["category"]),
+            html.Td(str(row["product_name"])[:60]),
+            html.Td(price_1st),
+            html.Td(price_2nd),
+            html.Td(diff_text, className=status_class),
+            html.Td(status, className=status_class),
+        ]))
+
+    body = html.Tbody(body_rows)
+    return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
 
 
 server = app.server
