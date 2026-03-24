@@ -5,30 +5,27 @@
 
 ## 기술 스택
 - Python 3.11+, BeautifulSoup (크롤링)
-- Apache Airflow (오케스트레이션, 매일 06:00 KST)
-- Apache Kafka (변경분만 전달: raw-prices → price-changes)
-- PostgreSQL 16 (운영 DB)
-- Snowflake (DWH, 추후 연결)
+- Apache Airflow (오케스트레이션, 매일 21:00/22:00 KST)
+- Snowflake (DWH, 3-Layer: Raw → Staging → Analytics)
+- PostgreSQL 16 (Airflow 메타DB 전용)
 - Dash/Plotly (웹 대시보드)
-- Docker Compose (9개 서비스)
+- Docker Compose (3개 서비스)
 
 ## 데이터 흐름
 ```
-크롤러 → Kafka[raw-prices] → change-detector → PostgreSQL + Kafka[price-changes]
+크롤러 → Airflow DAG → Snowflake (Raw → Staging → 변경감지/알림 → Analytics)
                                                      ↓
-                                              alert-service → alerts
-                                              snowflake-loader → Snowflake
-                                              dashboard ← PostgreSQL
+                                              dashboard ← Snowflake
 ```
 
 ## 프로젝트 구조
 ```
 src/
 ├── common/          # models, config, db, kafka_client, serialization, snowflake_client
-├── crawlers/        # base.py, danawa.py(완성), compuzone.py(미완성), pc_estimate.py(미완성)
-├── consumers/       # change_detector, alert_service, snowflake_loader
-├── dashboard/       # Dash 앱, postgres_queries
-└── airflow_dags/    # crawl_dag.py
+├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py
+├── consumers/       # change_detector, alert_service, snowflake_loader (레거시, 미사용)
+├── dashboard/       # Dash 앱, snowflake_queries
+└── airflow_dags/    # snowflake_pipeline_dag.py (5단계 파이프라인)
 ```
 
 ## 개발 규칙
@@ -43,28 +40,20 @@ src/
 - 테스트: `python -m pytest tests/ -v -o "addopts="` (pytest-cov 미설치 시)
 
 ## 기술적 주의사항
-- PostgreSQL: advisory lock 사용 (pg_advisory_xact_lock) — SELECT FOR UPDATE로는 없는 행 잠금 불가
-- SQLAlchemy 2.x: session.bind 대신 session.connection()
 - 다나와 크롤러: productItem* = 실제상품, adReaderProductItem*/adPointProductItem* = 광고
 - Frozen dataclass로 모든 DTO 정의
-- Kafka idempotent producer
+- Snowflake MERGE로 멱등성 보장
+- Airflow 2.8은 SQLAlchemy <2.0 필요 → Dockerfile에서 직접 의존성 설치
+- 변경 감지: LAG() 윈도우 함수로 이전 가격 비교, PRODUCT_STATS로 NEW_LOW/NEW_HIGH 판정
 
 ## Docker 서비스
 | 서비스 | 포트 |
 |--------|------|
 | Dashboard | localhost:8050 |
 | Airflow | localhost:8081 |
-| PostgreSQL | localhost:5432 |
-| Kafka | localhost:29092 |
+| PostgreSQL | localhost:5432 (Airflow 메타DB) |
 
 ## 실행
 ```bash
 docker compose up -d
-# Airflow DB 초기화 (최초 1회)
-docker compose run --rm airflow bash -c "airflow db init"
-docker compose restart airflow
-# PostgreSQL 스키마
-docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/001_initial_schema.sql
-docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/002_index_and_constraint_fixes.sql
-docker compose exec postgres psql -U computer_price -d computer_price -f /dev/stdin < migrations/versions/003_price_history_site_constraint.sql
 ```
