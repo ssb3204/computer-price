@@ -1,6 +1,6 @@
 """Snowflake 3-Layer 파이프라인 DAG.
 
-크롤링 → Raw 적재 → Staging 변환 → Analytics 집계
+크롤링 → Raw 적재 → Staging 변환 → 변경 감지/알림 → Analytics 집계
 매일 21:00, 22:00 KST (12:00, 13:00 UTC) 실행.
 """
 
@@ -19,7 +19,7 @@ default_args = {
 with DAG(
     dag_id="snowflake_price_pipeline",
     default_args=default_args,
-    description="크롤링 → Snowflake Raw → Staging → Analytics (매일 21:00, 22:00 KST)",
+    description="크롤링 → Raw → Staging → 변경감지 → Analytics (매일 21:00, 22:00 KST)",
     schedule_interval="0 12,13 * * *",  # 21:00, 22:00 KST = 12:00, 13:00 UTC
     start_date=datetime(2026, 3, 22),
     catchup=False,
@@ -240,8 +240,110 @@ with DAG(
         logger.info("[Staging] %d건 변환 완료", processed)
         return processed
 
+    def _detect_changes_and_alert(**context):
+        """Step 4: 가격 변경 감지 → STG_ALERTS 생성.
+
+        transform_staging 이후, aggregate_analytics 이전에 실행.
+        PRODUCT_STATS가 아직 갱신 전이므로 ALL_TIME_LOW/HIGH 비교가 정확함.
+        """
+        import logging
+
+        from src.common.config import SnowflakeSettings
+        from src.common.snowflake_client import get_connection
+
+        logger = logging.getLogger(__name__)
+        settings = SnowflakeSettings()
+
+        PRICE_DROP_PCT = -5.0
+        PRICE_SPIKE_PCT = 10.0
+
+        with get_connection(settings) as conn:
+            cur = conn.cursor()
+            cur.execute("USE DATABASE COMPUTER_PRICE")
+
+            cur.execute(f"""
+                INSERT INTO STAGING.STG_ALERTS
+                    (PRODUCT_ID, DAILY_PRICE_ID, ALERT_TYPE, OLD_PRICE, NEW_PRICE, CHANGE_PCT)
+                WITH ranked AS (
+                    SELECT
+                        PRODUCT_ID,
+                        ID AS DAILY_PRICE_ID,
+                        PRICE,
+                        CRAWLED_AT,
+                        LAG(PRICE) OVER (
+                            PARTITION BY PRODUCT_ID ORDER BY CRAWLED_AT
+                        ) AS prev_price,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY PRODUCT_ID ORDER BY CRAWLED_AT DESC
+                        ) AS rn
+                    FROM STAGING.STG_DAILY_PRICES
+                ),
+                candidates AS (
+                    SELECT
+                        r.PRODUCT_ID,
+                        r.DAILY_PRICE_ID,
+                        r.PRICE AS new_price,
+                        r.prev_price AS old_price,
+                        CASE WHEN r.prev_price > 0
+                             THEN ROUND((r.PRICE - r.prev_price)
+                                        / r.prev_price * 100, 4)
+                             ELSE NULL
+                        END AS change_pct,
+                        ps.ALL_TIME_LOW,
+                        ps.ALL_TIME_HIGH
+                    FROM ranked r
+                    LEFT JOIN ANALYTICS.PRODUCT_STATS ps
+                        ON r.PRODUCT_ID = ps.PRODUCT_ID
+                    WHERE r.rn = 1
+                      AND r.prev_price IS NOT NULL
+                      AND r.PRICE != r.prev_price
+                      AND NOT EXISTS (
+                          SELECT 1 FROM STAGING.STG_ALERTS a
+                          WHERE a.DAILY_PRICE_ID = r.DAILY_PRICE_ID
+                      )
+                )
+                SELECT
+                    PRODUCT_ID,
+                    DAILY_PRICE_ID,
+                    CASE
+                        WHEN ALL_TIME_LOW IS NOT NULL AND new_price < ALL_TIME_LOW
+                            THEN 'NEW_LOW'
+                        WHEN ALL_TIME_HIGH IS NOT NULL AND new_price > ALL_TIME_HIGH
+                            THEN 'NEW_HIGH'
+                        WHEN change_pct <= {PRICE_DROP_PCT}
+                            THEN 'PRICE_DROP'
+                        WHEN change_pct >= {PRICE_SPIKE_PCT}
+                            THEN 'PRICE_SPIKE'
+                    END AS alert_type,
+                    old_price,
+                    new_price,
+                    change_pct
+                FROM candidates
+                WHERE CASE
+                        WHEN ALL_TIME_LOW IS NOT NULL AND new_price < ALL_TIME_LOW
+                            THEN 'NEW_LOW'
+                        WHEN ALL_TIME_HIGH IS NOT NULL AND new_price > ALL_TIME_HIGH
+                            THEN 'NEW_HIGH'
+                        WHEN change_pct <= {PRICE_DROP_PCT}
+                            THEN 'PRICE_DROP'
+                        WHEN change_pct >= {PRICE_SPIKE_PCT}
+                            THEN 'PRICE_SPIKE'
+                    END IS NOT NULL
+            """)
+
+            alert_count = cur.rowcount
+            logger.info("[Alert] %d건 알림 생성", alert_count)
+
+            cur.execute("SELECT COUNT(*) FROM STAGING.STG_ALERTS")
+            total = cur.fetchone()[0]
+            logger.info("[Alert] STG_ALERTS 총 %d건", total)
+
+            cur.close()
+
+        return alert_count
+
     def _aggregate_analytics(**context):
-        """Step 4: Staging → Analytics 집계."""
+        """Step 5: Staging → Analytics 집계."""
         import logging
 
         from src.common.config import SnowflakeSettings
@@ -340,9 +442,14 @@ with DAG(
         python_callable=_transform_staging,
     )
 
+    detect_task = PythonOperator(
+        task_id="detect_changes_and_alert",
+        python_callable=_detect_changes_and_alert,
+    )
+
     analytics_task = PythonOperator(
         task_id="aggregate_analytics",
         python_callable=_aggregate_analytics,
     )
 
-    crawl_task >> raw_task >> staging_task >> analytics_task
+    crawl_task >> raw_task >> staging_task >> detect_task >> analytics_task

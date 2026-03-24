@@ -32,6 +32,9 @@ dev = [
     "isort>=5.13",
 ]
 
+[tool.setuptools.packages.find]
+include = ["src*"]
+
 [tool.black]
 line-length = 88
 target-version = ["py311"]
