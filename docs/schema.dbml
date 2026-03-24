@@ -1,0 +1,178 @@
+// 컴퓨터 가격 모니터링 시스템 — 3-Layer Architecture
+// https://dbdiagram.io 에 붙여넣기
+//
+// [Raw] 크롤링 원본 그대로
+// [Staging] 형변환, 특수문자 통일, 가격 정제
+// [Analytics] 시각화/분석용 최종 테이블
+
+// =====================================================
+//  LAYER 1: RAW — 크롤링 원본 (가공 없음)
+// =====================================================
+
+Table raw_crawled_prices {
+  id            bigint [pk, increment]
+  site          varchar(50)  [not null, note: '크롤링 사이트 원본 문자열']
+  category      varchar(100) [not null, note: '카테고리 원본 문자열']
+  product_name  text         [not null, note: '상품명 원본 (특수문자, 공백 그대로)']
+  price_text    varchar(100) [not null, note: '가격 원본 텍스트 ("1,234,500원", "₩1234500" 등)']
+  brand         varchar(200) [note: '브랜드 원본 (없을 수 있음)']
+  url           text         [not null]
+  stock_status  varchar(100) [note: '재고 상태 원본 텍스트 ("품절", "재고있음", null 등)']
+  is_processed  boolean      [not null, default: false, note: 'staging 변환 완료 여부']
+  processed_at  timestamptz  [note: 'staging 변환 시각']
+  crawled_at    timestamptz  [not null, note: '크롤링 시각']
+
+  indexes {
+    crawled_at [note: '수집일 기준 조회']
+    (site, crawled_at) [note: '사이트별 수집 이력']
+    (site, category, product_name, crawled_at) [unique, note: '재실행 시 중복 삽입 방지']
+  }
+
+  note: 'Layer 1: 크롤러가 수집한 원본 데이터. 어떤 가공도 하지 않음'
+}
+
+// =====================================================
+//  LAYER 2: STAGING — 정제/정규화
+// =====================================================
+
+Table dim_sites {
+  site_id   smallint    [pk, increment]
+  name      varchar(50) [unique, not null, note: 'danawa | compuzone | pc_estimate']
+  base_url  varchar(200) [not null]
+
+  note: 'Dimension: 크롤링 대상 사이트 (3건 고정)'
+}
+
+Table dim_categories {
+  category_id smallint    [pk, increment]
+  name        varchar(50) [unique, not null, note: 'CPU | GPU | RAM | SSD']
+
+  note: 'Dimension: 부품 카테고리'
+  // CHECK (name IN ('CPU', 'GPU', 'RAM', 'SSD'))
+}
+
+// dim_sites 1:N stg_products — 하나의 사이트에 여러 상품
+// dim_categories 1:N stg_products — 하나의 카테고리에 여러 상품
+Table stg_products {
+  product_id   bigint      [pk, increment, note: 'GENERATED ALWAYS AS IDENTITY']
+  site_id      smallint    [not null, ref: > dim_sites.site_id]
+  category_id  smallint    [not null, ref: > dim_categories.category_id]
+  name         varchar(500) [not null, note: '정제된 상품명 (trim, 특수문자 통일)']
+  brand        varchar(100) [note: '정제된 브랜드명']
+  model_number varchar(200)
+  url          text
+  created_at   timestamptz [not null, default: `now()`]
+  updated_at   timestamptz [not null, default: `now()`]
+
+  indexes {
+    (site_id, name) [unique, note: '같은 사이트 내 상품명 중복 방지']
+    site_id [note: 'FK 인덱스']
+    category_id
+  }
+
+  note: 'Dimension: 사이트별 개별 상품 (크로스사이트 매칭 안 함)'
+}
+
+// stg_products 1:N stg_daily_prices — 하나의 상품에 매일 가격 기록
+Table stg_daily_prices {
+  id            bigint      [pk, increment, note: 'GENERATED ALWAYS AS IDENTITY']
+  product_id    bigint      [not null, ref: > stg_products.product_id]
+  raw_id        bigint      [note: '원본 데이터 추적 (FK 아님, raw 삭제 시에도 유지)']
+  price         bigint      [not null, note: 'KRW 정수 (문자열 → int 변환 완료)']
+  stock_status  varchar(20) [not null, default: 'unknown', note: 'in_stock | out_of_stock | unknown']
+  crawled_at    timestamptz [not null]
+
+  indexes {
+    (product_id, crawled_at) [note: '상품별 시계열 조회 (DESC)']
+    crawled_at [note: '일별 집계용']
+  }
+
+  note: 'Fact: 일별 가격 스냅샷 (append-only). raw → 정제 완료된 가격'
+}
+
+// stg_products 1:1 stg_latest_prices — 상품당 최신 가격 1건
+Table stg_latest_prices {
+  product_id    bigint      [pk, ref: - stg_products.product_id]
+  price         bigint      [not null, note: 'KRW']
+  stock_status  varchar(20) [not null, default: 'unknown']
+  crawled_at    timestamptz [not null]
+  updated_at    timestamptz [not null, default: `now()`, note: 'UPSERT 시 갱신. WHERE crawled_at < EXCLUDED.crawled_at 조건 사용']
+
+  note: 'Fact: 현재 최신 가격 (UPSERT). 대시보드 빠른 조회용'
+}
+
+// stg_products 1:N stg_alerts — 하나의 상품에 여러 알림
+Table stg_alerts {
+  alert_id         bigint      [pk, increment, note: 'GENERATED ALWAYS AS IDENTITY']
+  product_id       bigint      [not null, ref: > stg_products.product_id]
+  daily_price_id   bigint      [ref: > stg_daily_prices.id, note: '알림 발생 원인 가격 레코드']
+  alert_type       varchar(30) [not null, note: 'NEW_LOW | NEW_HIGH | PRICE_DROP | PRICE_SPIKE']
+  old_price        bigint
+  new_price        bigint      [not null]
+  change_pct       decimal(8,4)
+  created_at       timestamptz [not null, default: `now()`]
+  is_read          boolean     [not null, default: false]
+
+  indexes {
+    (created_at) [note: 'DESC']
+    product_id
+    (alert_type, created_at)
+  }
+  // PARTIAL INDEX: (created_at DESC) WHERE is_read = false
+
+  note: 'Fact: 가격 변동 알림'
+}
+
+// =====================================================
+//  LAYER 3: ANALYTICS — 시각화/분석용 집계 테이블
+// =====================================================
+
+// stg_products 1:N analytics_daily_summary — 상품별 일별 집계
+Table analytics_daily_summary {
+  id           bigint        [pk, increment]
+  product_id   bigint        [not null, ref: > stg_products.product_id]
+  price_date   date          [not null, note: '집계 기준일']
+  min_price    bigint        [not null]
+  max_price    bigint        [not null]
+  avg_price    decimal(12,2) [not null]
+  record_count int           [not null, note: '해당일 수집 횟수']
+  stock_status varchar(20)   [not null, note: '마지막 수집 시점 재고 상태']
+
+  indexes {
+    (product_id, price_date) [unique, note: '상품+날짜 중복 방지']
+  }
+
+  note: 'Analytics: 일별 가격 요약 (stg_daily_prices 집계)'
+}
+
+// stg_products 1:N analytics_weekly_summary — 상품별 주간 집계
+Table analytics_weekly_summary {
+  id           bigint        [pk, increment]
+  product_id   bigint        [not null, ref: > stg_products.product_id]
+  week_start   date          [not null, note: '주 시작일 (월요일)']
+  min_price    bigint        [not null, note: '주간 최저가']
+  max_price    bigint        [not null, note: '주간 최고가']
+  avg_price    decimal(12,2) [not null, note: '주간 평균가']
+  record_count int           [not null]
+
+  indexes {
+    (product_id, week_start) [unique, note: '상품+주차 중복 방지']
+  }
+
+  note: 'Analytics: 주간 가격 요약. week_end는 week_start + 6으로 계산'
+  // CHECK (week_start = DATE_TRUNC('week', week_start))  -- 월요일 강제
+}
+
+// stg_products 1:1 analytics_product_stats — 상품별 전체 통계
+Table analytics_product_stats {
+  product_id       bigint        [pk, ref: - stg_products.product_id]
+  overall_avg      decimal(12,2) [not null, note: '전체 기간 평균가']
+  all_time_low     bigint        [not null, note: '역대 최저가']
+  all_time_high    bigint        [not null, note: '역대 최고가']
+  first_seen       timestamptz   [not null, note: '최초 수집 시각']
+  last_seen        timestamptz   [not null, note: '마지막 수집 시각']
+  total_records    int           [not null, note: '총 수집 횟수']
+  updated_at       timestamptz   [not null, default: `now()`]
+
+  note: 'Analytics: 상품별 전체 기간 통계'
+}

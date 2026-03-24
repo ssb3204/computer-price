@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup, Tag
 
-from src.common.models import RawPrice
+from src.common.models import RawCrawledPrice, RawPrice
 from src.crawlers.base import BaseCrawler
 from src.crawlers.parser_utils import classify_category, parse_korean_price
 
@@ -88,6 +88,12 @@ def _extract_price(item: Tag) -> int | None:
     return parse_korean_price(el.get_text(strip=True))
 
 
+def _extract_price_text(item: Tag) -> str | None:
+    """가격 원본 텍스트를 그대로 반환."""
+    el = item.select_one(".price_sect strong")
+    return el.get_text(strip=True) if el else None
+
+
 def _extract_url(item: Tag) -> str:
     link = item.select_one(".prod_name a[href]")
     if link:
@@ -130,6 +136,69 @@ class DanawaCrawler(BaseCrawler):
     def parse_page(self, html: str, url: str) -> list[RawPrice]:
         """Fallback: not used directly since crawl() is overridden."""
         return self._parse_product_list(html)
+
+    def crawl_raw(self) -> list[RawCrawledPrice]:
+        """Raw 데이터 수집 — 가격을 원본 텍스트로 보존."""
+        all_raw: list[RawCrawledPrice] = []
+
+        for target in PCODE_TARGETS:
+            url = f"{SEARCH_URL}?query={target.query}&tab=goods"
+            html = self._fetch_with_retry(url)
+            if html is None:
+                continue
+            soup = BeautifulSoup(html, "html.parser")
+            now = datetime.now(timezone.utc)
+
+            for item in soup.select("li.prod_item"):
+                if not _is_real_product(item):
+                    continue
+                pcode = _extract_pcode(item)
+                if pcode != target.pcode:
+                    continue
+                name = _extract_name(item)
+                price_text = _extract_price_text(item)
+                if name is None or price_text is None:
+                    break
+                product_url = _extract_url(item) or f"{PRODUCT_BASE}{target.pcode}"
+                all_raw.append(RawCrawledPrice(
+                    site="danawa", category=target.category,
+                    product_name=name, price_text=price_text,
+                    brand=target.brand, url=product_url,
+                    stock_status=None, crawled_at=now,
+                ))
+                break
+
+        for target in CATEGORY_TARGETS:
+            url = f"{CATEGORY_URL}?cate={target.cate_id}"
+            html = self._fetch_with_retry(url)
+            if html is None:
+                continue
+            soup = BeautifulSoup(html, "html.parser")
+            now = datetime.now(timezone.utc)
+            count = 0
+
+            for item in soup.select("li.prod_item"):
+                if not _is_real_product(item):
+                    continue
+                if count >= target.top_n:
+                    break
+                name = _extract_name(item)
+                price_text = _extract_price_text(item)
+                if name is None or price_text is None:
+                    continue
+                product_url = _extract_url(item) or (
+                    f"{PRODUCT_BASE}{_extract_pcode(item)}" if _extract_pcode(item) else ""
+                )
+                all_raw.append(RawCrawledPrice(
+                    site="danawa", category=target.category,
+                    product_name=name, price_text=price_text,
+                    brand=None, url=product_url,
+                    stock_status=None, crawled_at=now,
+                ))
+                count += 1
+
+        logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
+        return all_raw
 
     # ── Strategy 1: pcode search ──
 
