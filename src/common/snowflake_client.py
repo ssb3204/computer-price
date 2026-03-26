@@ -1,7 +1,7 @@
 """Snowflake connection and batch operations."""
 
 import logging
-from collections.abc import Generator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -25,7 +25,7 @@ def create_connection(settings: SnowflakeSettings) -> SnowflakeConnection:
 
 
 @contextmanager
-def get_connection(settings: SnowflakeSettings) -> Generator[SnowflakeConnection, None, None]:
+def get_connection(settings: SnowflakeSettings) -> Iterator[SnowflakeConnection]:
     conn = create_connection(settings)
     try:
         yield conn

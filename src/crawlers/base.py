@@ -48,7 +48,7 @@ class BaseCrawler(ABC):
                 prices = self.parse_page(html, url)
                 all_prices.extend(prices)
                 logger.info("Parsed %d prices from %s", len(prices), url)
-            except Exception:
+            except (ValueError, TypeError, AttributeError, KeyError):
                 logger.exception("Failed to parse %s", url)
 
         logger.info("Crawled %d total prices from %s", len(all_prices), self.site_name)

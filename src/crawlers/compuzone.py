@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import requests
 from bs4 import BeautifulSoup
 
 from src.common.models import RawCrawledPrice, RawPrice
@@ -50,13 +51,35 @@ class CompuzoneCrawler(BaseCrawler):
         """Fallback: not used directly since crawl() is overridden."""
         return self._parse_list_html(html, category="Unknown", top_n=20)
 
+    def _fetch_category_html(self, target: TargetCategory) -> str | None:
+        """카테고리 페이지 POST 요청 → HTML 반환. 실패 시 None."""
+        self._rate_limit()
+        form_data = {
+            "actype": "getList", "BigDivNo": "4",
+            "MediumDivNo": target.medium_div_no, "DivNo": "0",
+            "PageCount": "20", "StartNum": "0", "PageNum": "1",
+            "PreOrder": "recommand", "lvm": "L", "ps_po": "P",
+            "ScrollPage": "1", "ProductType": "list",
+            "PageType": "ProductList", "setPricechk": "N",
+        }
+        try:
+            resp = self._session.post(LIST_URL, data=form_data, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = "euc-kr"
+            return resp.text
+        except requests.RequestException:
+            logger.exception("Failed to fetch %s category %s", self.site_name, target.category)
+            return None
+
     def crawl(self) -> list[RawPrice]:
         """Override base crawl to use POST requests per category."""
         all_prices: list[RawPrice] = []
 
         for target in CATEGORY_TARGETS:
-            prices = self._crawl_category(target)
-            all_prices.extend(prices)
+            html = self._fetch_category_html(target)
+            if html is None:
+                continue
+            all_prices.extend(self._parse_list_html(html, target.category, target.top_n))
 
         logger.info("Crawled %d total prices from %s", len(all_prices), self.site_name)
         return all_prices
@@ -66,24 +89,11 @@ class CompuzoneCrawler(BaseCrawler):
         all_raw: list[RawCrawledPrice] = []
 
         for target in CATEGORY_TARGETS:
-            self._rate_limit()
-            form_data = {
-                "actype": "getList", "BigDivNo": "4",
-                "MediumDivNo": target.medium_div_no, "DivNo": "0",
-                "PageCount": "20", "StartNum": "0", "PageNum": "1",
-                "PreOrder": "recommand", "lvm": "L", "ps_po": "P",
-                "ScrollPage": "1", "ProductType": "list",
-                "PageType": "ProductList", "setPricechk": "N",
-            }
-            try:
-                resp = self._session.post(LIST_URL, data=form_data, timeout=30)
-                resp.raise_for_status()
-                resp.encoding = "euc-kr"
-            except Exception:
-                logger.exception("Failed to fetch %s category %s", self.site_name, target.category)
+            html = self._fetch_category_html(target)
+            if html is None:
                 continue
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
             now = datetime.now(timezone.utc)
             count = 0
 
@@ -116,37 +126,6 @@ class CompuzoneCrawler(BaseCrawler):
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw
-
-    def _crawl_category(self, target: TargetCategory) -> list[RawPrice]:
-        """Fetch one category page via POST and extract top-N products."""
-        self._rate_limit()
-
-        form_data = {
-            "actype": "getList",
-            "BigDivNo": "4",
-            "MediumDivNo": target.medium_div_no,
-            "DivNo": "0",
-            "PageCount": "20",
-            "StartNum": "0",
-            "PageNum": "1",
-            "PreOrder": "recommand",
-            "lvm": "L",
-            "ps_po": "P",
-            "ScrollPage": "1",
-            "ProductType": "list",
-            "PageType": "ProductList",
-            "setPricechk": "N",
-        }
-
-        try:
-            resp = self._session.post(LIST_URL, data=form_data, timeout=30)
-            resp.raise_for_status()
-            resp.encoding = "euc-kr"
-        except Exception:
-            logger.exception("Failed to fetch %s category %s", self.site_name, target.category)
-            return []
-
-        return self._parse_list_html(resp.text, target.category, target.top_n)
 
     def _parse_list_html(self, html: str, category: str, top_n: int) -> list[RawPrice]:
         """Parse product list HTML and return top-N RawPrice items."""
