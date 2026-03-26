@@ -16,6 +16,7 @@ from dash.dependencies import Input, Output
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
 from src.dashboard.data_access.snowflake_queries import (
+    get_alerts,
     get_category_price_summary,
     get_latest_prices_all,
     get_price_trend,
@@ -23,6 +24,7 @@ from src.dashboard.data_access.snowflake_queries import (
     get_summary_stats,
     get_today_crawl_comparison,
 )
+from src.dashboard.layouts.alerts import alerts_layout
 
 app = dash.Dash(
     __name__,
@@ -127,6 +129,7 @@ app.layout = dbc.Container([
                 dbc.NavLink("카테고리 요약", href="/categories", active="exact"),
                 dbc.NavLink("상품 통계", href="/stats", active="exact"),
                 dbc.NavLink("가격 추이", href="/trends", active="exact"),
+                dbc.NavLink("가격 알림", href="/alerts", active="exact"),
             ], vertical=True, pills=True),
         ], width=2, className="bg-dark vh-100 pt-3 position-fixed",
            style={"overflowY": "auto"}),
@@ -167,26 +170,25 @@ def prices_page():
         html.H2("전체 가격표", className="mb-4"),
         dbc.Row([
             dbc.Col([
-                html.Label("카테고리 필터"),
-                dcc.Dropdown(
-                    id="price-category-filter",
-                    options=[{"label": "전체", "value": "ALL"}] + [
-                        {"label": c, "value": c} for c in ["CPU", "GPU", "RAM", "SSD"]
-                    ],
-                    value="ALL",
-                ),
-            ], width=3),
+                dbc.ButtonGroup([
+                    dbc.Button("전체", id="price-cat-btn-ALL", color="primary", outline=False, size="sm"),
+                    dbc.Button("CPU", id="price-cat-btn-CPU", color="primary", outline=True, size="sm"),
+                    dbc.Button("GPU", id="price-cat-btn-GPU", color="primary", outline=True, size="sm"),
+                    dbc.Button("RAM", id="price-cat-btn-RAM", color="primary", outline=True, size="sm"),
+                    dbc.Button("SSD", id="price-cat-btn-SSD", color="primary", outline=True, size="sm"),
+                ]),
+                dcc.Store(id="price-category-filter", data="ALL"),
+            ], width="auto", className="me-3"),
             dbc.Col([
-                html.Label("사이트 필터"),
-                dcc.Dropdown(
-                    id="price-site-filter",
-                    options=[{"label": "전체", "value": "ALL"}] + [
-                        {"label": s, "value": s} for s in SITE_DISPLAY
-                    ],
-                    value="ALL",
-                ),
-            ], width=3),
-        ], className="mb-4"),
+                dbc.ButtonGroup([
+                    dbc.Button("전체", id="price-site-btn-ALL", color="info", outline=False, size="sm"),
+                    dbc.Button("다나와", id="price-site-btn-다나와", color="info", outline=True, size="sm"),
+                    dbc.Button("컴퓨존", id="price-site-btn-컴퓨존", color="info", outline=True, size="sm"),
+                    dbc.Button("견적왕", id="price-site-btn-견적왕", color="info", outline=True, size="sm"),
+                ]),
+                dcc.Store(id="price-site-filter", data="ALL"),
+            ], width="auto"),
+        ], className="mb-4 align-items-center"),
         html.Div(id="full-prices-table"),
     ])
 
@@ -212,38 +214,34 @@ def trends_page():
         # ── Filters ──
         dbc.Row([
             dbc.Col([
-                html.Label("카테고리"),
-                dcc.Dropdown(
-                    id="trend-category-filter",
-                    options=[{"label": "전체", "value": "ALL"}] + [
-                        {"label": c, "value": c} for c in ["CPU", "GPU", "RAM", "SSD"]
-                    ],
-                    value="ALL",
-                ),
-            ], width=2),
+                dbc.ButtonGroup([
+                    dbc.Button("전체", id="cat-btn-ALL", color="primary", outline=False, size="sm"),
+                    dbc.Button("CPU", id="cat-btn-CPU", color="primary", outline=True, size="sm"),
+                    dbc.Button("GPU", id="cat-btn-GPU", color="primary", outline=True, size="sm"),
+                    dbc.Button("RAM", id="cat-btn-RAM", color="primary", outline=True, size="sm"),
+                    dbc.Button("SSD", id="cat-btn-SSD", color="primary", outline=True, size="sm"),
+                ]),
+                dcc.Store(id="trend-category-filter", data="ALL"),
+            ], width="auto", className="me-3"),
             dbc.Col([
-                html.Label("상품 검색 (예: 9070 XT, 7800X3D)"),
-                dcc.Input(
+                dbc.Input(
                     id="trend-search-input",
                     type="text",
-                    placeholder="검색어 입력 후 Enter",
+                    placeholder="상품 검색 (예: 9070 XT, 7800X3D)",
                     debounce=True,
-                    className="form-control",
+                    size="sm",
                 ),
-            ], width=4),
+            ], width=3, className="me-3"),
             dbc.Col([
-                html.Label("기간"),
-                dcc.Dropdown(
-                    id="trend-period",
-                    options=[
-                        {"label": "7일", "value": 7},
-                        {"label": "14일", "value": 14},
-                        {"label": "30일", "value": 30},
-                    ],
-                    value=7,
-                ),
-            ], width=2),
-        ], className="mb-4"),
+                dbc.ButtonGroup([
+                    dbc.Button("전체", id="period-btn-0", color="info", outline=False, size="sm"),
+                    dbc.Button("7일", id="period-btn-7", color="info", outline=True, size="sm"),
+                    dbc.Button("14일", id="period-btn-14", color="info", outline=True, size="sm"),
+                    dbc.Button("30일", id="period-btn-30", color="info", outline=True, size="sm"),
+                ]),
+                dcc.Store(id="trend-period", data=0),
+            ], width="auto"),
+        ], className="mb-4 align-items-center"),
 
         # ── Line Chart ──
         dbc.Row([
@@ -273,6 +271,8 @@ def display_page(pathname):
         return stats_page()
     if pathname == "/trends":
         return trends_page()
+    if pathname == "/alerts":
+        return alerts_layout()
     return overview_page()
 
 
@@ -329,8 +329,8 @@ def update_overview(_):
 
 @app.callback(
     Output("full-prices-table", "children"),
-    [Input("price-category-filter", "value"),
-     Input("price-site-filter", "value")],
+    [Input("price-category-filter", "data"),
+     Input("price-site-filter", "data")],
 )
 def update_prices_table(category, site):
     with _get_conn() as conn:
@@ -407,17 +407,16 @@ def _empty_chart(message: str) -> go.Figure:
 @app.callback(
     [Output("trend-chart", "figure"),
      Output("trend-summary", "children")],
-    [Input("trend-category-filter", "value"),
+    [Input("trend-category-filter", "data"),
      Input("trend-search-input", "value"),
-     Input("trend-period", "value")],
+     Input("trend-period", "data")],
 )
 def update_trend_chart(category, search, days):
     if not search:
         return _empty_chart("검색어를 입력하면 사이트별 가격 추이를 볼 수 있습니다"), []
 
-    days = days or 7
     with _get_conn() as conn:
-        df = get_price_trend(conn, category=category, search=search, days=days)
+        df = get_price_trend(conn, category=category, search=search, days=days if days else None)
 
     if df.empty:
         return _empty_chart(f'"{search}" 검색 결과 없음'), []
@@ -466,7 +465,7 @@ def update_trend_chart(category, search, days):
         dbc.Col(dbc.Card(dbc.CardBody([
             html.H6("데이터 포인트", className="card-subtitle text-muted"),
             html.H3(f"{len(df)}건"),
-            html.Small(f"최근 {days}일", className="text-muted"),
+            html.Small("전체 기간" if not days else f"최근 {days}일", className="text-muted"),
         ]), color="dark"), width=3),
     ]
 
@@ -475,7 +474,7 @@ def update_trend_chart(category, search, days):
 
 @app.callback(
     Output("today-comparison-table", "children"),
-    [Input("trend-category-filter", "value"),
+    [Input("trend-category-filter", "data"),
      Input("trend-search-input", "value")],
 )
 def update_today_comparison(category, search):
@@ -519,6 +518,109 @@ def update_today_comparison(category, search):
 
     body = html.Tbody(body_rows)
     return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
+
+
+# ── Callbacks: Alerts ──
+
+ALERT_TYPE_DISPLAY = {
+    "NEW_LOW": "🔵 최저가 갱신",
+    "NEW_HIGH": "🔴 최고가 갱신",
+    "PRICE_DROP": "🟢 가격 하락",
+    "PRICE_SPIKE": "🔴 가격 급등",
+}
+
+ALERT_TYPE_CLASS = {
+    "NEW_LOW": "text-info",
+    "NEW_HIGH": "text-danger",
+    "PRICE_DROP": "text-success",
+    "PRICE_SPIKE": "text-danger",
+}
+
+
+@app.callback(
+    Output("alerts-table", "children"),
+    [Input("alert-type-filter", "data"),
+     Input("alert-category-filter", "data"),
+     Input("alerts-refresh-interval", "n_intervals")],
+)
+def update_alerts_table(alert_type, category, _):
+    with _get_conn() as conn:
+        df = get_alerts(conn, alert_type=alert_type, category=category)
+
+    if df.empty:
+        return html.P("알림 없음", className="text-muted")
+
+    cards = []
+    for _, row in df.iterrows():
+        alert_type_raw = str(row["alert_type"])
+        type_display = ALERT_TYPE_DISPLAY.get(alert_type_raw, alert_type_raw)
+        type_class = ALERT_TYPE_CLASS.get(alert_type_raw, "")
+
+        name = str(row["product_name"])[:60]
+        url = row.get("url", "")
+        name_cell = html.A(name, href=url, target="_blank", className="text-info") if url else name
+
+        old_price = f"{int(row['old_price']):,}원" if row["old_price"] else "-"
+        new_price = f"{int(row['new_price']):,}원"
+        change_pct = f"{float(row['change_pct']):+.1f}%" if row["change_pct"] is not None else "-"
+
+        created = str(row["created_at"])[:16]
+
+        cards.append(dbc.Card(dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.Span(type_display, className=f"fw-bold {type_class}"),
+                    html.Span(f"  {row['category']} · {row['site']}", className="text-muted ms-2"),
+                ], width=8),
+                dbc.Col(
+                    html.Small(created, className="text-muted"),
+                    width=4, className="text-end",
+                ),
+            ], className="mb-2"),
+            html.Div(name_cell, className="mb-2"),
+            dbc.Row([
+                dbc.Col(html.Span(f"{old_price} → {new_price}", className="text-light"), width="auto"),
+                dbc.Col(html.Span(change_pct, className=f"fw-bold {type_class}"), width="auto"),
+            ]),
+        ]), color="dark", className="mb-2"))
+
+    return cards
+
+
+
+# ── Button Toggle Helper ──
+
+def _register_button_toggle(store_id, btn_prefix, items, default=None):
+    """버튼 그룹 토글 콜백을 등록하는 헬퍼."""
+    if default is None:
+        default = items[0]
+
+    @app.callback(
+        [Output(store_id, "data")] +
+        [Output(f"{btn_prefix}{v}", "outline") for v in items],
+        [Input(f"{btn_prefix}{v}", "n_clicks") for v in items],
+        prevent_initial_call=True,
+    )
+    def _toggle(*n_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return [default] + [v != default for v in items]
+        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        selected_str = button_id.replace(btn_prefix, "")
+        selected = type(default)(selected_str) if not isinstance(default, str) else selected_str
+        return [selected] + [v != selected for v in items]
+
+    return _toggle
+
+
+CATEGORIES = ["ALL", "CPU", "GPU", "RAM", "SSD"]
+
+_register_button_toggle("trend-category-filter", "cat-btn-", CATEGORIES, "ALL")
+_register_button_toggle("trend-period", "period-btn-", [0, 7, 14, 30], 0)
+_register_button_toggle("price-category-filter", "price-cat-btn-", CATEGORIES, "ALL")
+_register_button_toggle("price-site-filter", "price-site-btn-", ["ALL", "다나와", "컴퓨존", "견적왕"], "ALL")
+_register_button_toggle("alert-type-filter", "alert-btn-", ["ALL", "NEW_LOW", "NEW_HIGH", "PRICE_DROP", "PRICE_SPIKE"], "ALL")
+_register_button_toggle("alert-category-filter", "alert-cat-btn-", CATEGORIES, "ALL")
 
 
 server = app.server

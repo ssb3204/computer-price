@@ -98,17 +98,22 @@ def get_price_trend(
     conn: SnowflakeConnection,
     category: str | None = None,
     search: str | None = None,
-    days: int = 7,
+    days: int | None = None,
 ) -> pd.DataFrame:
     """검색 키워드 매칭 상품의 사이트별 최저가 추이 (라인 차트용).
 
     같은 사이트에 여러 매칭 상품이 있으면 크롤 시점별 최저가만 반환.
+    days=None이면 전체 기간 조회.
     """
     if not search:
         return pd.DataFrame()
 
-    conditions = ["dp.CRAWLED_AT >= DATEADD(day, -%s, CURRENT_TIMESTAMP())"]
-    params: list = [days]
+    conditions: list[str] = []
+    params: list = []
+
+    if days:
+        conditions.append("dp.CRAWLED_AT >= DATEADD(day, -%s, CURRENT_TIMESTAMP())")
+        params.append(days)
 
     if category and category != "ALL":
         conditions.append("c.NAME = %s")
@@ -197,6 +202,59 @@ def get_today_crawl_comparison(
         JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
         WHERE d1.rn = 1
         ORDER BY c.NAME, p.NAME
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql, params)
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
+def get_alerts(
+    conn: SnowflakeConnection,
+    alert_type: str | None = None,
+    category: str | None = None,
+    days: int | None = None,
+) -> pd.DataFrame:
+    """알림 목록 조회 (필터: 유형, 카테고리, 기간). 1% 미만 변동 제외."""
+    conditions: list[str] = ["ABS(a.CHANGE_PCT) >= 1.0"]
+    params: list = []
+
+    if alert_type and alert_type != "ALL":
+        conditions.append("a.ALERT_TYPE = %s")
+        params.append(alert_type)
+
+    if category and category != "ALL":
+        conditions.append("c.NAME = %s")
+        params.append(category)
+
+    if days:
+        conditions.append("a.CREATED_AT >= DATEADD(day, -%s, CURRENT_TIMESTAMP())")
+        params.append(days)
+
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    sql = f"""
+        SELECT
+            a.ALERT_ID,
+            a.ALERT_TYPE,
+            s.DISPLAY_NAME AS SITE,
+            c.NAME AS CATEGORY,
+            p.NAME AS PRODUCT_NAME,
+            p.URL,
+            a.OLD_PRICE,
+            a.NEW_PRICE,
+            a.CHANGE_PCT,
+            a.CREATED_AT
+        FROM STAGING.STG_ALERTS a
+        JOIN STAGING.STG_PRODUCTS p ON p.PRODUCT_ID = a.PRODUCT_ID
+        JOIN STAGING.DIM_SITES s ON s.SITE_ID = p.SITE_ID
+        JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
+        {where}
+        ORDER BY a.CREATED_AT DESC
     """
     cur = conn.cursor()
     try:
