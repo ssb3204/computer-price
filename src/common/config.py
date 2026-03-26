@@ -6,8 +6,8 @@ from pydantic_settings import BaseSettings
 class PostgresSettings(BaseSettings):
     model_config = {"env_prefix": "POSTGRES_"}
 
-    user: str = "computer_price"
-    password: str = "changeme"
+    user: str
+    password: str
     host: str = "postgres"
     port: int = 5432
     db: str = "computer_price"
@@ -17,27 +17,27 @@ class PostgresSettings(BaseSettings):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
-class KafkaSettings(BaseSettings):
-    model_config = {"env_prefix": "KAFKA_"}
-
-    bootstrap_servers: str = "kafka:9092"
-
-
 class SnowflakeSettings(BaseSettings):
     model_config = {"env_prefix": "SNOWFLAKE_"}
 
-    account: str = ""
-    user: str = ""
-    password: str = ""
+    account: str
+    user: str
+    password: str
     warehouse: str = "COMPUTE_WH"
     database: str = "COMPUTER_PRICE"
     schema_name: str = "RAW"  # 'schema' is reserved by pydantic
 
 
+class SlackSettings(BaseSettings):
+    model_config = {"env_prefix": "SLACK_"}
+
+    webhook_url: str = ""
+
+
 class AppSettings(BaseSettings):
     postgres: PostgresSettings = PostgresSettings()
-    kafka: KafkaSettings = KafkaSettings()
     snowflake: SnowflakeSettings = SnowflakeSettings()
+    slack: SlackSettings = SlackSettings()
     dash_debug: bool = False
 
 
