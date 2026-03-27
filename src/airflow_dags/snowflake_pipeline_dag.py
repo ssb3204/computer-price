@@ -31,6 +31,7 @@ with DAG(
         """Step 1: 3개 사이트 크롤링 → Raw 데이터 수집."""
         import json
         import logging
+        from datetime import datetime, timezone
 
         import requests
 
@@ -41,6 +42,7 @@ with DAG(
 
         logger = logging.getLogger(__name__)
         all_raw: list[RawCrawledPrice] = []
+        crawl_failures: list[dict] = []
 
         for CrawlerClass in [DanawaCrawler, CompuzoneCrawler, PCEstimateCrawler]:
             crawler = CrawlerClass()
@@ -48,10 +50,17 @@ with DAG(
                 raw_prices = crawler.crawl_raw()
                 all_raw.extend(raw_prices)
                 logger.info("[크롤링] %s: %d건", crawler.site_name, len(raw_prices))
-            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError):
+            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as e:
+                failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                crawl_failures.append({
+                    "site_name": crawler.site_name,
+                    "error": f"{type(e).__name__}: {e}",
+                    "failed_at": failed_at,
+                })
                 logger.exception("[크롤링] %s 실패", crawler.site_name)
 
         logger.info("[크롤링] 총 %d건 수집", len(all_raw))
+        context["ti"].xcom_push(key="crawl_failures", value=crawl_failures)
 
         # XCom으로 다음 태스크에 전달 (직렬화)
         serialized = [
@@ -371,7 +380,7 @@ with DAG(
         return alert_count
 
     def _send_slack_alerts(**context):
-        """Step 4.5: 새 알림을 Slack으로 전송."""
+        """Step 4.5: 크롤링 실패 시 Slack으로 전송."""
         import json
         import logging
         import os
@@ -385,62 +394,16 @@ with DAG(
             logger.info("[Slack] SLACK_WEBHOOK_URL 미설정 — 건너뜀")
             return 0
 
-        alert_count = context["ti"].xcom_pull(task_ids="detect_changes_and_alert")
-        if not alert_count:
-            logger.info("[Slack] 새 알림 없음 — 건너뜀")
+        crawl_failures = context["ti"].xcom_pull(task_ids="crawl_all_sites", key="crawl_failures") or []
+        if not crawl_failures:
+            logger.info("[Slack] 크롤링 실패 없음 — 건너뜀")
             return 0
 
-        # 최근 생성된 알림 조회
-        from src.common.config import SnowflakeSettings
-        from src.common.snowflake_client import get_connection
-
-        settings = SnowflakeSettings()
-        with get_connection(settings) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT
-                    a.ALERT_TYPE,
-                    s.DISPLAY_NAME AS SITE,
-                    c.NAME AS CATEGORY,
-                    p.NAME AS PRODUCT_NAME,
-                    a.OLD_PRICE,
-                    a.NEW_PRICE,
-                    a.CHANGE_PCT
-                FROM STAGING.STG_ALERTS a
-                JOIN STAGING.STG_PRODUCTS p ON p.PRODUCT_ID = a.PRODUCT_ID
-                JOIN STAGING.DIM_SITES s ON s.SITE_ID = p.SITE_ID
-                JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
-                WHERE a.CREATED_AT >= DATEADD(hour, -1, CURRENT_TIMESTAMP())
-                ORDER BY a.CREATED_AT DESC
-                LIMIT 20
-            """)
-            rows = cur.fetchall()
-            cur.close()
-
-        if not rows:
-            return 0
-
-        ALERT_EMOJI = {
-            "NEW_LOW": "🔵", "NEW_HIGH": "🔴",
-            "PRICE_DROP": "🟢", "PRICE_SPIKE": "🔴",
-        }
-        ALERT_LABEL = {
-            "NEW_LOW": "최저가 갱신", "NEW_HIGH": "최고가 갱신",
-            "PRICE_DROP": "가격 하락", "PRICE_SPIKE": "가격 급등",
-        }
-
-        lines = [f"*🔔 가격 알림 — {len(rows)}건*\n"]
-        for alert_type, site, category, product_name, old_price, new_price, change_pct in rows:
-            emoji = ALERT_EMOJI.get(alert_type, "⚪")
-            label = ALERT_LABEL.get(alert_type, alert_type)
-            pct_str = f"{float(change_pct):+.1f}%" if change_pct is not None else ""
-            old_str = f"{int(old_price):,}원" if old_price else "?"
-            new_str = f"{int(new_price):,}원"
-            name_short = product_name[:50]
+        lines = [f"*⚠️ 크롤링 실패 — {len(crawl_failures)}개 사이트*\n"]
+        for failure in crawl_failures:
             lines.append(
-                f"{emoji} *[{label}]* {category} | {site}\n"
-                f"    {name_short}\n"
-                f"    {old_str} → {new_str} ({pct_str})"
+                f"🔴 *{failure['site_name']}* — {failure['failed_at']}\n"
+                f"    `{failure['error']}`"
             )
 
         payload = {"text": "\n".join(lines)}
@@ -455,7 +418,7 @@ with DAG(
         except (urllib.error.URLError, urllib.error.HTTPError, OSError):
             logger.exception("[Slack] 전송 실패")
 
-        return len(rows)
+        return len(crawl_failures)
 
     def _aggregate_analytics(**context):
         """Step 5: Staging → Analytics 집계."""
