@@ -14,7 +14,6 @@ def get_latest_prices_all(conn: SnowflakeConnection) -> pd.DataFrame:
             p.NAME AS PRODUCT_NAME,
             p.BRAND,
             lp.PRICE,
-            lp.STOCK_STATUS,
             lp.CRAWLED_AT,
             p.URL
         FROM STAGING.STG_LATEST_PRICES lp

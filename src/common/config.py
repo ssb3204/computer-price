@@ -35,7 +35,6 @@ class SlackSettings(BaseSettings):
 
 
 class AppSettings(BaseSettings):
-    postgres: PostgresSettings = PostgresSettings()
     snowflake: SnowflakeSettings = SnowflakeSettings()
     slack: SlackSettings = SlackSettings()
     dash_debug: bool = False

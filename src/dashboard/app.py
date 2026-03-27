@@ -35,12 +35,6 @@ app = dash.Dash(
 
 sf_settings = SnowflakeSettings()
 
-STOCK_DISPLAY = {
-    "in_stock": "판매중",
-    "out_of_stock": "품절",
-    "unknown": "-",
-}
-
 SITE_DISPLAY = ["다나와", "컴퓨존", "견적왕"]
 
 
@@ -56,8 +50,7 @@ def _make_price_table(df, max_rows=None):
     rows_to_show = df.head(max_rows) if max_rows else df
 
     header = html.Thead(html.Tr([
-        html.Th("카테고리"), html.Th("사이트"), html.Th("상품명"),
-        html.Th("가격"), html.Th("재고"),
+        html.Th("카테고리"), html.Th("사이트"), html.Th("상품명"), html.Th("가격"),
     ]))
 
     body_rows = []
@@ -70,14 +63,12 @@ def _make_price_table(df, max_rows=None):
             name_cell = name
 
         price = f"{int(row['price']):,}원"
-        stock = STOCK_DISPLAY.get(row.get("stock_status", "unknown"), "-")
 
         body_rows.append(html.Tr([
             html.Td(row["category"]),
             html.Td(row["site"]),
             html.Td(name_cell),
             html.Td(price),
-            html.Td(stock),
         ]))
 
     body = html.Tbody(body_rows)

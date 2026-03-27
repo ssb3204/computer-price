@@ -62,7 +62,6 @@ with DAG(
                 "price_text": rp.price_text,
                 "brand": rp.brand,
                 "url": rp.url,
-                "stock_status": rp.stock_status,
                 "crawled_at": rp.crawled_at.isoformat(),
             }
             for rp in all_raw
@@ -94,17 +93,17 @@ with DAG(
                 CREATE TEMPORARY TABLE TEMP_RAW_LOAD (
                     SITE STRING, CATEGORY STRING, PRODUCT_NAME STRING,
                     PRICE_TEXT STRING, BRAND STRING, URL STRING,
-                    STOCK_STATUS STRING, CRAWLED_AT STRING
+                    CRAWLED_AT STRING
                 )
             """)
 
             rows = [
                 (rp["site"], rp["category"], rp["product_name"], rp["price_text"],
-                 rp["brand"], rp["url"], rp["stock_status"], rp["crawled_at"])
+                 rp["brand"], rp["url"], rp["crawled_at"])
                 for rp in raw_data
             ]
             cur.executemany(
-                "INSERT INTO TEMP_RAW_LOAD VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO TEMP_RAW_LOAD VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 rows,
             )
 
@@ -114,9 +113,9 @@ with DAG(
                 ON t.SITE = s.SITE AND t.CATEGORY = s.CATEGORY
                    AND t.PRODUCT_NAME = s.PRODUCT_NAME AND t.CRAWLED_AT = s.CRAWLED_AT
                 WHEN NOT MATCHED THEN INSERT
-                    (SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, STOCK_STATUS, CRAWLED_AT)
+                    (SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, CRAWLED_AT)
                     VALUES (s.SITE, s.CATEGORY, s.PRODUCT_NAME, s.PRICE_TEXT,
-                            s.BRAND, s.URL, s.STOCK_STATUS, s.CRAWLED_AT)
+                            s.BRAND, s.URL, s.CRAWLED_AT)
             """)
             count = cur.rowcount
 
@@ -174,7 +173,7 @@ with DAG(
             cur.execute("USE SCHEMA RAW")
             cur.execute(
                 "SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, "
-                "STOCK_STATUS, CRAWLED_AT FROM RAW_CRAWLED_PRICES WHERE IS_PROCESSED = FALSE"
+                "CRAWLED_AT FROM RAW_CRAWLED_PRICES WHERE IS_PROCESSED = FALSE"
             )
             raw_rows = cur.fetchall()
             cur.execute("USE SCHEMA STAGING")
@@ -187,7 +186,7 @@ with DAG(
             # Python에서 가격 파싱 → 유효한 행만 수집
             parsed = []
             for row in raw_rows:
-                raw_id, site, category, product_name, price_text, brand, url, stock_status, crawled_at = row
+                raw_id, site, category, product_name, price_text, brand, url, crawled_at = row
                 price = parse_korean_price(price_text)
                 if price is None:
                     continue
@@ -226,13 +225,13 @@ with DAG(
                 product_id = product_map.get((site_id, name))
                 if product_id is None:
                     continue
-                daily_rows.append((product_id, raw_id, price, "in_stock", crawled_at))
+                daily_rows.append((product_id, raw_id, price, crawled_at))
                 processed_raw_ids.append(raw_id)
 
             if daily_rows:
                 cur.executemany(
-                    "INSERT INTO STG_DAILY_PRICES (PRODUCT_ID, RAW_ID, PRICE, STOCK_STATUS, CRAWLED_AT) "
-                    "VALUES (%s, %s, %s, %s, %s)",
+                    "INSERT INTO STG_DAILY_PRICES (PRODUCT_ID, RAW_ID, PRICE, CRAWLED_AT) "
+                    "VALUES (%s, %s, %s, %s)",
                     daily_rows,
                 )
 
@@ -240,14 +239,14 @@ with DAG(
             if daily_rows:
                 cur.executemany(
                     "MERGE INTO STG_LATEST_PRICES t "
-                    "USING (SELECT %s AS PRODUCT_ID, %s AS PRICE, %s AS STOCK_STATUS, %s AS CRAWLED_AT) s "
+                    "USING (SELECT %s AS PRODUCT_ID, %s AS PRICE, %s AS CRAWLED_AT) s "
                     "ON t.PRODUCT_ID = s.PRODUCT_ID "
-                    "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, PRICE, STOCK_STATUS, CRAWLED_AT) "
-                    "VALUES (s.PRODUCT_ID, s.PRICE, s.STOCK_STATUS, s.CRAWLED_AT) "
+                    "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, PRICE, CRAWLED_AT) "
+                    "VALUES (s.PRODUCT_ID, s.PRICE, s.CRAWLED_AT) "
                     "WHEN MATCHED AND t.CRAWLED_AT <= s.CRAWLED_AT THEN UPDATE SET "
-                    "PRICE = s.PRICE, STOCK_STATUS = s.STOCK_STATUS, "
+                    "PRICE = s.PRICE, "
                     "CRAWLED_AT = s.CRAWLED_AT, UPDATED_AT = CURRENT_TIMESTAMP()",
-                    [(pid, price, stock, cat) for pid, _, price, stock, cat in daily_rows],
+                    [(pid, price, cat) for pid, _, price, cat in daily_rows],
                 )
 
             # 5) Batch mark raw as processed
@@ -476,16 +475,15 @@ with DAG(
                 USING (
                     SELECT PRODUCT_ID, CRAWLED_AT::DATE AS PRICE_DATE,
                         MIN(PRICE) AS MIN_PRICE, MAX(PRICE) AS MAX_PRICE,
-                        AVG(PRICE) AS AVG_PRICE, COUNT(*) AS RECORD_COUNT,
-                        MAX_BY(STOCK_STATUS, CRAWLED_AT) AS STOCK_STATUS
+                        AVG(PRICE) AS AVG_PRICE, COUNT(*) AS RECORD_COUNT
                     FROM STAGING.STG_DAILY_PRICES GROUP BY PRODUCT_ID, CRAWLED_AT::DATE
                 ) s ON t.PRODUCT_ID = s.PRODUCT_ID AND t.PRICE_DATE = s.PRICE_DATE
                 WHEN NOT MATCHED THEN INSERT
-                    (PRODUCT_ID, PRICE_DATE, MIN_PRICE, MAX_PRICE, AVG_PRICE, RECORD_COUNT, STOCK_STATUS)
-                    VALUES (s.PRODUCT_ID, s.PRICE_DATE, s.MIN_PRICE, s.MAX_PRICE, s.AVG_PRICE, s.RECORD_COUNT, s.STOCK_STATUS)
+                    (PRODUCT_ID, PRICE_DATE, MIN_PRICE, MAX_PRICE, AVG_PRICE, RECORD_COUNT)
+                    VALUES (s.PRODUCT_ID, s.PRICE_DATE, s.MIN_PRICE, s.MAX_PRICE, s.AVG_PRICE, s.RECORD_COUNT)
                 WHEN MATCHED THEN UPDATE SET
                     MIN_PRICE = s.MIN_PRICE, MAX_PRICE = s.MAX_PRICE,
-                    AVG_PRICE = s.AVG_PRICE, RECORD_COUNT = s.RECORD_COUNT, STOCK_STATUS = s.STOCK_STATUS
+                    AVG_PRICE = s.AVG_PRICE, RECORD_COUNT = s.RECORD_COUNT
             """)
 
             # Weekly summary

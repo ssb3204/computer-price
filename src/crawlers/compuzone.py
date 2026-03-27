@@ -120,7 +120,7 @@ class CompuzoneCrawler(BaseCrawler):
                     product_name=name_tag.get_text(strip=True),
                     price_text=raw_price,
                     brand=None, url=product_url,
-                    stock_status=None, crawled_at=now,
+                    crawled_at=now,
                 ))
                 count += 1
 

@@ -164,7 +164,7 @@ class DanawaCrawler(BaseCrawler):
                     site="danawa", category=target.category,
                     product_name=name, price_text=price_text,
                     brand=target.brand, url=product_url,
-                    stock_status=None, crawled_at=now,
+                    crawled_at=now,
                 ))
                 break
 
@@ -193,7 +193,7 @@ class DanawaCrawler(BaseCrawler):
                     site="danawa", category=target.category,
                     product_name=name, price_text=price_text,
                     brand=None, url=product_url,
-                    stock_status=None, crawled_at=now,
+                    crawled_at=now,
                 ))
                 count += 1
 

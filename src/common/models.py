@@ -35,7 +35,6 @@ class RawCrawledPrice:
     price_text: str       # 가격 원본 텍스트 ("1,234,500원" 등)
     brand: str | None
     url: str
-    stock_status: str | None  # 재고 상태 원본
     crawled_at: datetime
 
 
