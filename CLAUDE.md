@@ -21,11 +21,10 @@
 ## 프로젝트 구조
 ```
 src/
-├── common/          # models, config, db, kafka_client, serialization, snowflake_client
+├── common/          # models, config, db, snowflake_client
 ├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py
-├── consumers/       # change_detector, alert_service, snowflake_loader (레거시, 미사용)
 ├── dashboard/       # Dash 앱, snowflake_queries
-└── airflow_dags/    # snowflake_pipeline_dag.py (5단계 파이프라인)
+└── airflow_dags/    # snowflake_pipeline_dag.py (6단계 파이프라인)
 ```
 
 ## 개발 규칙

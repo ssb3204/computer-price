@@ -32,6 +32,8 @@ with DAG(
         import json
         import logging
 
+        import requests
+
         from src.common.models import RawCrawledPrice
         from src.crawlers.compuzone import CompuzoneCrawler
         from src.crawlers.danawa import DanawaCrawler
@@ -46,7 +48,7 @@ with DAG(
                 raw_prices = crawler.crawl_raw()
                 all_raw.extend(raw_prices)
                 logger.info("[크롤링] %s: %d건", crawler.site_name, len(raw_prices))
-            except Exception:
+            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError):
                 logger.exception("[크롤링] %s 실패", crawler.site_name)
 
         logger.info("[크롤링] 총 %d건 수집", len(all_raw))
@@ -69,9 +71,8 @@ with DAG(
         return len(all_raw)
 
     def _load_raw(**context):
-        """Step 2: Raw 레이어에 원본 데이터 적재."""
+        """Step 2: Raw 레이어에 원본 데이터 적재 (batch)."""
         import logging
-        from datetime import datetime, timezone
 
         from src.common.config import SnowflakeSettings
         from src.common.snowflake_client import get_connection
@@ -86,27 +87,38 @@ with DAG(
         settings = SnowflakeSettings()
         with get_connection(settings) as conn:
             cur = conn.cursor()
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute("USE SCHEMA RAW")
 
-            count = 0
-            for rp in raw_data:
-                cur.execute(
-                    """INSERT INTO RAW_CRAWLED_PRICES
-                       (SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, STOCK_STATUS, CRAWLED_AT)
-                       SELECT %s, %s, %s, %s, %s, %s, %s, %s
-                       WHERE NOT EXISTS (
-                           SELECT 1 FROM RAW_CRAWLED_PRICES
-                           WHERE SITE = %s AND CATEGORY = %s
-                             AND PRODUCT_NAME = %s AND CRAWLED_AT = %s
-                       )""",
-                    (
-                        rp["site"], rp["category"], rp["product_name"], rp["price_text"],
-                        rp["brand"], rp["url"], rp["stock_status"], rp["crawled_at"],
-                        rp["site"], rp["category"], rp["product_name"], rp["crawled_at"],
-                    ),
+            # Temp table에 batch insert 후 MERGE로 중복 제거
+            cur.execute("""
+                CREATE TEMPORARY TABLE TEMP_RAW_LOAD (
+                    SITE STRING, CATEGORY STRING, PRODUCT_NAME STRING,
+                    PRICE_TEXT STRING, BRAND STRING, URL STRING,
+                    STOCK_STATUS STRING, CRAWLED_AT STRING
                 )
-                count += 1
+            """)
+
+            rows = [
+                (rp["site"], rp["category"], rp["product_name"], rp["price_text"],
+                 rp["brand"], rp["url"], rp["stock_status"], rp["crawled_at"])
+                for rp in raw_data
+            ]
+            cur.executemany(
+                "INSERT INTO TEMP_RAW_LOAD VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                rows,
+            )
+
+            cur.execute("""
+                MERGE INTO RAW_CRAWLED_PRICES t
+                USING TEMP_RAW_LOAD s
+                ON t.SITE = s.SITE AND t.CATEGORY = s.CATEGORY
+                   AND t.PRODUCT_NAME = s.PRODUCT_NAME AND t.CRAWLED_AT = s.CRAWLED_AT
+                WHEN NOT MATCHED THEN INSERT
+                    (SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, STOCK_STATUS, CRAWLED_AT)
+                    VALUES (s.SITE, s.CATEGORY, s.PRODUCT_NAME, s.PRICE_TEXT,
+                            s.BRAND, s.URL, s.STOCK_STATUS, s.CRAWLED_AT)
+            """)
+            count = cur.rowcount
 
             cur.close()
 
@@ -114,7 +126,7 @@ with DAG(
         return count
 
     def _transform_staging(**context):
-        """Step 3: Raw → Staging 변환."""
+        """Step 3: Raw → Staging 변환 (batch)."""
         import logging
         import re
 
@@ -134,7 +146,6 @@ with DAG(
         settings = SnowflakeSettings()
         with get_connection(settings) as conn:
             cur = conn.cursor()
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute("USE SCHEMA STAGING")
 
             # Ensure DIM tables
@@ -159,61 +170,75 @@ with DAG(
             cur.execute("SELECT CATEGORY_ID, NAME FROM DIM_CATEGORIES")
             cat_map = {row[1]: row[0] for row in cur.fetchall()}
 
-            # Process unprocessed raw rows
+            # Fetch unprocessed raw rows
             cur.execute("USE SCHEMA RAW")
             cur.execute(
                 "SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, "
                 "STOCK_STATUS, CRAWLED_AT FROM RAW_CRAWLED_PRICES WHERE IS_PROCESSED = FALSE"
             )
             raw_rows = cur.fetchall()
-
             cur.execute("USE SCHEMA STAGING")
-            processed = 0
 
+            if not raw_rows:
+                logger.info("[Staging] 변환할 데이터 없음")
+                cur.close()
+                return 0
+
+            # Python에서 가격 파싱 → 유효한 행만 수집
+            parsed = []
             for row in raw_rows:
                 raw_id, site, category, product_name, price_text, brand, url, stock_status, crawled_at = row
-
                 price = parse_korean_price(price_text)
                 if price is None:
                     continue
-
                 site_id = site_map.get(site)
                 cat_id = cat_map.get(category)
                 if site_id is None or cat_id is None:
                     continue
-
                 cleaned_name = re.sub(r"\s+", " ", product_name.strip())
-                stock = "in_stock"
+                parsed.append((raw_id, site_id, cat_id, cleaned_name, brand, url, price, crawled_at))
 
-                # MERGE product
-                cur.execute(
-                    "MERGE INTO STG_PRODUCTS t "
-                    "USING (SELECT %s AS SITE_ID, %s AS NAME) s "
-                    "ON t.SITE_ID = s.SITE_ID AND t.NAME = s.NAME "
-                    "WHEN NOT MATCHED THEN INSERT (SITE_ID, CATEGORY_ID, NAME, BRAND, URL) "
-                    "VALUES (%s, %s, %s, %s, %s) "
-                    "WHEN MATCHED THEN UPDATE SET UPDATED_AT = CURRENT_TIMESTAMP()",
-                    (site_id, cleaned_name, site_id, cat_id, cleaned_name, brand, url),
-                )
+            if not parsed:
+                logger.info("[Staging] 유효한 데이터 없음")
+                cur.close()
+                return 0
 
-                cur.execute(
-                    "SELECT PRODUCT_ID FROM STG_PRODUCTS WHERE SITE_ID = %s AND NAME = %s",
-                    (site_id, cleaned_name),
-                )
-                product_row = cur.fetchone()
-                if not product_row:
+            # 1) Batch MERGE products
+            cur.executemany(
+                "MERGE INTO STG_PRODUCTS t "
+                "USING (SELECT %s AS SITE_ID, %s AS NAME) s "
+                "ON t.SITE_ID = s.SITE_ID AND t.NAME = s.NAME "
+                "WHEN NOT MATCHED THEN INSERT (SITE_ID, CATEGORY_ID, NAME, BRAND, URL) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "WHEN MATCHED THEN UPDATE SET UPDATED_AT = CURRENT_TIMESTAMP()",
+                [(site_id, name, site_id, cat_id, name, brand, url)
+                 for _, site_id, cat_id, name, brand, url, _, _ in parsed],
+            )
+
+            # 2) Fetch product_id mapping (single query)
+            cur.execute("SELECT PRODUCT_ID, SITE_ID, NAME FROM STG_PRODUCTS")
+            product_map = {(row[1], row[2]): row[0] for row in cur.fetchall()}
+
+            # 3) Batch INSERT daily prices
+            daily_rows = []
+            processed_raw_ids = []
+            for raw_id, site_id, cat_id, name, brand, url, price, crawled_at in parsed:
+                product_id = product_map.get((site_id, name))
+                if product_id is None:
                     continue
-                product_id = product_row[0]
+                daily_rows.append((product_id, raw_id, price, "in_stock", crawled_at))
+                processed_raw_ids.append(raw_id)
 
-                # Insert daily price
-                cur.execute(
+            if daily_rows:
+                cur.executemany(
                     "INSERT INTO STG_DAILY_PRICES (PRODUCT_ID, RAW_ID, PRICE, STOCK_STATUS, CRAWLED_AT) "
                     "VALUES (%s, %s, %s, %s, %s)",
-                    (product_id, raw_id, price, stock, crawled_at),
+                    daily_rows,
                 )
 
-                # Upsert latest price
-                cur.execute(
+            # 4) Batch MERGE latest prices
+            if daily_rows:
+                cur.executemany(
                     "MERGE INTO STG_LATEST_PRICES t "
                     "USING (SELECT %s AS PRODUCT_ID, %s AS PRICE, %s AS STOCK_STATUS, %s AS CRAWLED_AT) s "
                     "ON t.PRODUCT_ID = s.PRODUCT_ID "
@@ -222,23 +247,23 @@ with DAG(
                     "WHEN MATCHED AND t.CRAWLED_AT <= s.CRAWLED_AT THEN UPDATE SET "
                     "PRICE = s.PRICE, STOCK_STATUS = s.STOCK_STATUS, "
                     "CRAWLED_AT = s.CRAWLED_AT, UPDATED_AT = CURRENT_TIMESTAMP()",
-                    (product_id, price, stock, crawled_at),
+                    [(pid, price, stock, cat) for pid, _, price, stock, cat in daily_rows],
                 )
 
-                # Mark raw as processed
+            # 5) Batch mark raw as processed
+            if processed_raw_ids:
                 cur.execute("USE SCHEMA RAW")
+                placeholders = ", ".join(["%s"] * len(processed_raw_ids))
                 cur.execute(
-                    "UPDATE RAW_CRAWLED_PRICES SET IS_PROCESSED = TRUE, "
-                    "PROCESSED_AT = CURRENT_TIMESTAMP() WHERE ID = %s",
-                    (raw_id,),
+                    f"UPDATE RAW_CRAWLED_PRICES SET IS_PROCESSED = TRUE, "  # noqa: S608
+                    f"PROCESSED_AT = CURRENT_TIMESTAMP() WHERE ID IN ({placeholders})",
+                    processed_raw_ids,
                 )
-                cur.execute("USE SCHEMA STAGING")
-                processed += 1
 
             cur.close()
 
-        logger.info("[Staging] %d건 변환 완료", processed)
-        return processed
+        logger.info("[Staging] %d건 변환 완료", len(daily_rows))
+        return len(daily_rows)
 
     def _detect_changes_and_alert(**context):
         """Step 4: 가격 변경 감지 → STG_ALERTS 생성.
@@ -254,14 +279,13 @@ with DAG(
         logger = logging.getLogger(__name__)
         settings = SnowflakeSettings()
 
+        MIN_CHANGE_PCT = 1.0   # 최소 1% 변동 시에만 알림
         PRICE_DROP_PCT = -5.0
         PRICE_SPIKE_PCT = 10.0
 
         with get_connection(settings) as conn:
             cur = conn.cursor()
-            cur.execute("USE DATABASE COMPUTER_PRICE")
-
-            cur.execute(f"""
+            cur.execute("""
                 INSERT INTO STAGING.STG_ALERTS
                     (PRODUCT_ID, DAILY_PRICE_ID, ALERT_TYPE, OLD_PRICE, NEW_PRICE, CHANGE_PCT)
                 WITH ranked AS (
@@ -297,6 +321,7 @@ with DAG(
                     WHERE r.rn = 1
                       AND r.prev_price IS NOT NULL
                       AND r.PRICE != r.prev_price
+                      AND ABS((r.PRICE - r.prev_price) / r.prev_price * 100) >= %s
                       AND NOT EXISTS (
                           SELECT 1 FROM STAGING.STG_ALERTS a
                           WHERE a.DAILY_PRICE_ID = r.DAILY_PRICE_ID
@@ -310,9 +335,9 @@ with DAG(
                             THEN 'NEW_LOW'
                         WHEN ALL_TIME_HIGH IS NOT NULL AND new_price > ALL_TIME_HIGH
                             THEN 'NEW_HIGH'
-                        WHEN change_pct <= {PRICE_DROP_PCT}
+                        WHEN change_pct <= %s
                             THEN 'PRICE_DROP'
-                        WHEN change_pct >= {PRICE_SPIKE_PCT}
+                        WHEN change_pct >= %s
                             THEN 'PRICE_SPIKE'
                     END AS alert_type,
                     old_price,
@@ -324,12 +349,16 @@ with DAG(
                             THEN 'NEW_LOW'
                         WHEN ALL_TIME_HIGH IS NOT NULL AND new_price > ALL_TIME_HIGH
                             THEN 'NEW_HIGH'
-                        WHEN change_pct <= {PRICE_DROP_PCT}
+                        WHEN change_pct <= %s
                             THEN 'PRICE_DROP'
-                        WHEN change_pct >= {PRICE_SPIKE_PCT}
+                        WHEN change_pct >= %s
                             THEN 'PRICE_SPIKE'
                     END IS NOT NULL
-            """)
+            """, (
+                MIN_CHANGE_PCT,
+                PRICE_DROP_PCT, PRICE_SPIKE_PCT,
+                PRICE_DROP_PCT, PRICE_SPIKE_PCT,
+            ))
 
             alert_count = cur.rowcount
             logger.info("[Alert] %d건 알림 생성", alert_count)
@@ -341,6 +370,93 @@ with DAG(
             cur.close()
 
         return alert_count
+
+    def _send_slack_alerts(**context):
+        """Step 4.5: 새 알림을 Slack으로 전송."""
+        import json
+        import logging
+        import os
+        import urllib.error
+        import urllib.request
+
+        logger = logging.getLogger(__name__)
+
+        webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+        if not webhook_url:
+            logger.info("[Slack] SLACK_WEBHOOK_URL 미설정 — 건너뜀")
+            return 0
+
+        alert_count = context["ti"].xcom_pull(task_ids="detect_changes_and_alert")
+        if not alert_count:
+            logger.info("[Slack] 새 알림 없음 — 건너뜀")
+            return 0
+
+        # 최근 생성된 알림 조회
+        from src.common.config import SnowflakeSettings
+        from src.common.snowflake_client import get_connection
+
+        settings = SnowflakeSettings()
+        with get_connection(settings) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT
+                    a.ALERT_TYPE,
+                    s.DISPLAY_NAME AS SITE,
+                    c.NAME AS CATEGORY,
+                    p.NAME AS PRODUCT_NAME,
+                    a.OLD_PRICE,
+                    a.NEW_PRICE,
+                    a.CHANGE_PCT
+                FROM STAGING.STG_ALERTS a
+                JOIN STAGING.STG_PRODUCTS p ON p.PRODUCT_ID = a.PRODUCT_ID
+                JOIN STAGING.DIM_SITES s ON s.SITE_ID = p.SITE_ID
+                JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
+                WHERE a.CREATED_AT >= DATEADD(hour, -1, CURRENT_TIMESTAMP())
+                ORDER BY a.CREATED_AT DESC
+                LIMIT 20
+            """)
+            rows = cur.fetchall()
+            cur.close()
+
+        if not rows:
+            return 0
+
+        ALERT_EMOJI = {
+            "NEW_LOW": "🔵", "NEW_HIGH": "🔴",
+            "PRICE_DROP": "🟢", "PRICE_SPIKE": "🔴",
+        }
+        ALERT_LABEL = {
+            "NEW_LOW": "최저가 갱신", "NEW_HIGH": "최고가 갱신",
+            "PRICE_DROP": "가격 하락", "PRICE_SPIKE": "가격 급등",
+        }
+
+        lines = [f"*🔔 가격 알림 — {len(rows)}건*\n"]
+        for alert_type, site, category, product_name, old_price, new_price, change_pct in rows:
+            emoji = ALERT_EMOJI.get(alert_type, "⚪")
+            label = ALERT_LABEL.get(alert_type, alert_type)
+            pct_str = f"{float(change_pct):+.1f}%" if change_pct is not None else ""
+            old_str = f"{int(old_price):,}원" if old_price else "?"
+            new_str = f"{int(new_price):,}원"
+            name_short = product_name[:50]
+            lines.append(
+                f"{emoji} *[{label}]* {category} | {site}\n"
+                f"    {name_short}\n"
+                f"    {old_str} → {new_str} ({pct_str})"
+            )
+
+        payload = {"text": "\n".join(lines)}
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                logger.info("[Slack] 전송 완료 (status=%d)", resp.status)
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            logger.exception("[Slack] 전송 실패")
+
+        return len(rows)
 
     def _aggregate_analytics(**context):
         """Step 5: Staging → Analytics 집계."""
@@ -354,8 +470,6 @@ with DAG(
 
         with get_connection(settings) as conn:
             cur = conn.cursor()
-            cur.execute("USE DATABASE COMPUTER_PRICE")
-
             # Daily summary
             cur.execute("""
                 MERGE INTO ANALYTICS.DAILY_SUMMARY t
@@ -411,16 +525,17 @@ with DAG(
                     UPDATED_AT = CURRENT_TIMESTAMP()
             """)
 
-            # 결과 로그
-            for schema, table in [
+            # 결과 로그 — 허용 목록 기반 (외부 입력 없음)
+            ALLOWED_TABLES = {
                 ("RAW", "RAW_CRAWLED_PRICES"),
                 ("STAGING", "STG_PRODUCTS"),
                 ("STAGING", "STG_DAILY_PRICES"),
                 ("ANALYTICS", "DAILY_SUMMARY"),
                 ("ANALYTICS", "WEEKLY_SUMMARY"),
                 ("ANALYTICS", "PRODUCT_STATS"),
-            ]:
-                cur.execute(f"SELECT COUNT(*) FROM {schema}.{table}")
+            }
+            for schema, table in ALLOWED_TABLES:
+                cur.execute(f"SELECT COUNT(*) FROM {schema}.{table}")  # noqa: S608
                 logger.info("[Analytics] %s.%s: %d건", schema, table, cur.fetchone()[0])
 
             cur.close()
@@ -447,9 +562,14 @@ with DAG(
         python_callable=_detect_changes_and_alert,
     )
 
+    slack_task = PythonOperator(
+        task_id="send_slack_alerts",
+        python_callable=_send_slack_alerts,
+    )
+
     analytics_task = PythonOperator(
         task_id="aggregate_analytics",
         python_callable=_aggregate_analytics,
     )
 
-    crawl_task >> raw_task >> staging_task >> detect_task >> analytics_task
+    crawl_task >> raw_task >> staging_task >> detect_task >> slack_task >> analytics_task
