@@ -245,7 +245,7 @@ def trends_page():
         # ── Today Crawl Comparison ──
         dbc.Row([
             dbc.Col([
-                html.H5("오늘 크롤링 비교 (1차 vs 2차)", className="mb-3"),
+                html.H5("오늘 크롤링 비교", className="mb-3"),
                 html.Div(id="today-comparison-table"),
             ], width=12),
         ]),
@@ -426,7 +426,13 @@ def update_trend_chart(category, search, days):
         plot_bgcolor="rgba(0,0,0,0)",
         hovermode="x unified",
         legend={"orientation": "h", "y": -0.15},
+        hoverlabel={
+            "bgcolor": "rgba(30,30,30,0.95)",
+            "font_color": "#ffffff",
+            "bordercolor": "#555555",
+        },
     )
+    fig.update_traces(hovertemplate="%{y:,.0f}원<extra>%{fullData.name}</extra>")
     fig.update_yaxes(tickformat=",", title="가격 (원)")
     fig.update_xaxes(title="")
 
@@ -477,34 +483,37 @@ def update_today_comparison(category, search):
 
     header = html.Thead(html.Tr([
         html.Th("사이트"), html.Th("카테고리"), html.Th("상품명"),
-        html.Th("1차 가격"), html.Th("2차 가격"),
-        html.Th("변동"), html.Th("상태"),
+        html.Th("1차"), html.Th("2차"), html.Th("3차"), html.Th("4차"),
     ]))
+
+    def _fmt(val):
+        return f"{int(val):,}원" if val is not None and str(val) not in ("", "None", "nan") else "-"
+
+    def _cell(val, prev_val):
+        text = _fmt(val)
+        if val is None or str(val) in ("", "None", "nan"):
+            return html.Td(text, className="text-muted")
+        if prev_val is not None and str(prev_val) not in ("", "None", "nan"):
+            if float(val) > float(prev_val):
+                return html.Td(text, className="text-danger")
+            if float(val) < float(prev_val):
+                return html.Td(text, className="text-success")
+        return html.Td(text)
 
     body_rows = []
     for _, row in df.iterrows():
-        price_1st = f"{int(row['price_1st']):,}원"
-        price_2nd = f"{int(row['price_2nd']):,}원" if row["price_2nd"] else "-"
-        diff = int(row["price_diff"])
-        diff_text = f"{diff:+,}원" if diff != 0 else "0원"
-        status = str(row["change_status"])
-
-        # 상태별 색상
-        if "상승" in status:
-            status_class = "text-danger"
-        elif "하락" in status:
-            status_class = "text-success"
-        else:
-            status_class = "text-muted"
-
+        p1 = row["price_1st"]
+        p2 = row.get("price_2nd")
+        p3 = row.get("price_3rd")
+        p4 = row.get("price_4th")
         body_rows.append(html.Tr([
             html.Td(row["site"]),
             html.Td(row["category"]),
             html.Td(str(row["product_name"])[:60]),
-            html.Td(price_1st),
-            html.Td(price_2nd),
-            html.Td(diff_text, className=status_class),
-            html.Td(status, className=status_class),
+            html.Td(_fmt(p1)),
+            _cell(p2, p1),
+            _cell(p3, p2),
+            _cell(p4, p3),
         ]))
 
     body = html.Tbody(body_rows)

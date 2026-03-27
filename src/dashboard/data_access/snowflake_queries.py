@@ -151,7 +151,7 @@ def get_today_crawl_comparison(
     category: str | None = None,
     search: str | None = None,
 ) -> pd.DataFrame:
-    """오늘 크롤링 2회(1차/2차) 가격 비교."""
+    """오늘 크롤링 4회(1~4차) 가격 비교."""
     conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()"]
     params: list = []
 
@@ -181,21 +181,17 @@ def get_today_crawl_comparison(
             WHERE {where}
         )
         SELECT
-            s.DISPLAY_NAME           AS site,
-            c.NAME                   AS category,
-            p.NAME                   AS product_name,
-            d1.PRICE                 AS price_1st,
-            d2.PRICE                 AS price_2nd,
-            COALESCE(d2.PRICE - d1.PRICE, 0) AS price_diff,
-            CASE
-                WHEN d2.PRICE IS NULL          THEN '1회만'
-                WHEN d2.PRICE > d1.PRICE       THEN '▲ 상승'
-                WHEN d2.PRICE < d1.PRICE       THEN '▼ 하락'
-                ELSE '- 유지'
-            END AS change_status
+            s.DISPLAY_NAME  AS site,
+            c.NAME          AS category,
+            p.NAME          AS product_name,
+            d1.PRICE        AS price_1st,
+            d2.PRICE        AS price_2nd,
+            d3.PRICE        AS price_3rd,
+            d4.PRICE        AS price_4th
         FROM daily d1
-        LEFT JOIN daily d2
-            ON d1.PRODUCT_ID = d2.PRODUCT_ID AND d2.rn = 2
+        LEFT JOIN daily d2 ON d1.PRODUCT_ID = d2.PRODUCT_ID AND d2.rn = 2
+        LEFT JOIN daily d3 ON d1.PRODUCT_ID = d3.PRODUCT_ID AND d3.rn = 3
+        LEFT JOIN daily d4 ON d1.PRODUCT_ID = d4.PRODUCT_ID AND d4.rn = 4
         JOIN STAGING.STG_PRODUCTS   p ON p.PRODUCT_ID  = d1.PRODUCT_ID
         JOIN STAGING.DIM_SITES      s ON s.SITE_ID     = p.SITE_ID
         JOIN STAGING.DIM_CATEGORIES c ON c.CATEGORY_ID = p.CATEGORY_ID
