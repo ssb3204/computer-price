@@ -347,59 +347,52 @@ def aggregate_analytics(settings: SnowflakeSettings) -> None:
         cur.execute("""
             MERGE INTO ANALYTICS.DAILY_SUMMARY t
             USING (
-                SELECT
-                    dp.CRAWLED_AT::DATE AS summary_date,
-                    p.CATEGORY_ID,
-                    p.SITE_ID,
-                    COUNT(*)            AS record_count,
-                    MIN(dp.PRICE)       AS min_price,
-                    MAX(dp.PRICE)       AS max_price,
-                    ROUND(AVG(dp.PRICE)) AS avg_price
-                FROM STAGING.STG_DAILY_PRICES dp
-                JOIN STAGING.STG_PRODUCTS p ON p.PRODUCT_ID = dp.PRODUCT_ID
-                GROUP BY dp.CRAWLED_AT::DATE, p.CATEGORY_ID, p.SITE_ID
-            ) s
-            ON t.SUMMARY_DATE = s.summary_date
-               AND t.CATEGORY_ID = s.CATEGORY_ID
-               AND t.SITE_ID = s.SITE_ID
+                SELECT PRODUCT_ID, CRAWLED_AT::DATE AS PRICE_DATE,
+                    MIN(PRICE) AS MIN_PRICE, MAX(PRICE) AS MAX_PRICE,
+                    AVG(PRICE) AS AVG_PRICE, COUNT(*) AS RECORD_COUNT
+                FROM STAGING.STG_DAILY_PRICES GROUP BY PRODUCT_ID, CRAWLED_AT::DATE
+            ) s ON t.PRODUCT_ID = s.PRODUCT_ID AND t.PRICE_DATE = s.PRICE_DATE
             WHEN NOT MATCHED THEN INSERT
-                (SUMMARY_DATE, CATEGORY_ID, SITE_ID, RECORD_COUNT,
-                 MIN_PRICE, MAX_PRICE, AVG_PRICE)
-                VALUES (s.summary_date, s.CATEGORY_ID, s.SITE_ID, s.record_count,
-                        s.min_price, s.max_price, s.avg_price)
+                (PRODUCT_ID, PRICE_DATE, MIN_PRICE, MAX_PRICE, AVG_PRICE, RECORD_COUNT)
+                VALUES (s.PRODUCT_ID, s.PRICE_DATE, s.MIN_PRICE, s.MAX_PRICE, s.AVG_PRICE, s.RECORD_COUNT)
             WHEN MATCHED THEN UPDATE SET
-                RECORD_COUNT = s.record_count,
-                MIN_PRICE    = s.min_price,
-                MAX_PRICE    = s.max_price,
-                AVG_PRICE    = s.avg_price
+                MIN_PRICE = s.MIN_PRICE, MAX_PRICE = s.MAX_PRICE,
+                AVG_PRICE = s.AVG_PRICE, RECORD_COUNT = s.RECORD_COUNT
+        """)
+        # WEEKLY_SUMMARY
+        cur.execute("""
+            MERGE INTO ANALYTICS.WEEKLY_SUMMARY t
+            USING (
+                SELECT PRODUCT_ID, DATE_TRUNC('WEEK', CRAWLED_AT)::DATE AS WEEK_START,
+                    MIN(PRICE) AS MIN_PRICE, MAX(PRICE) AS MAX_PRICE,
+                    AVG(PRICE) AS AVG_PRICE, COUNT(*) AS RECORD_COUNT
+                FROM STAGING.STG_DAILY_PRICES GROUP BY PRODUCT_ID, DATE_TRUNC('WEEK', CRAWLED_AT)
+            ) s ON t.PRODUCT_ID = s.PRODUCT_ID AND t.WEEK_START = s.WEEK_START
+            WHEN NOT MATCHED THEN INSERT
+                (PRODUCT_ID, WEEK_START, MIN_PRICE, MAX_PRICE, AVG_PRICE, RECORD_COUNT)
+                VALUES (s.PRODUCT_ID, s.WEEK_START, s.MIN_PRICE, s.MAX_PRICE, s.AVG_PRICE, s.RECORD_COUNT)
+            WHEN MATCHED THEN UPDATE SET
+                MIN_PRICE = s.MIN_PRICE, MAX_PRICE = s.MAX_PRICE,
+                AVG_PRICE = s.AVG_PRICE, RECORD_COUNT = s.RECORD_COUNT
         """)
         # PRODUCT_STATS
         cur.execute("""
             MERGE INTO ANALYTICS.PRODUCT_STATS t
             USING (
-                SELECT
-                    PRODUCT_ID,
-                    ROUND(AVG(PRICE))  AS overall_avg,
-                    MIN(PRICE)         AS all_time_low,
-                    MAX(PRICE)         AS all_time_high,
-                    MIN(CRAWLED_AT)    AS first_seen,
-                    MAX(CRAWLED_AT)    AS last_seen,
-                    COUNT(*)           AS total_records
-                FROM STAGING.STG_DAILY_PRICES
-                GROUP BY PRODUCT_ID
-            ) s
-            ON t.PRODUCT_ID = s.PRODUCT_ID
+                SELECT PRODUCT_ID, AVG(PRICE) AS OVERALL_AVG,
+                    MIN(PRICE) AS ALL_TIME_LOW, MAX(PRICE) AS ALL_TIME_HIGH,
+                    MIN(CRAWLED_AT) AS FIRST_SEEN, MAX(CRAWLED_AT) AS LAST_SEEN,
+                    COUNT(*) AS TOTAL_RECORDS
+                FROM STAGING.STG_DAILY_PRICES GROUP BY PRODUCT_ID
+            ) s ON t.PRODUCT_ID = s.PRODUCT_ID
             WHEN NOT MATCHED THEN INSERT
-                (PRODUCT_ID, OVERALL_AVG, ALL_TIME_LOW, ALL_TIME_HIGH,
-                 FIRST_SEEN, LAST_SEEN, TOTAL_RECORDS)
-                VALUES (s.PRODUCT_ID, s.overall_avg, s.all_time_low, s.all_time_high,
-                        s.first_seen, s.last_seen, s.total_records)
+                (PRODUCT_ID, OVERALL_AVG, ALL_TIME_LOW, ALL_TIME_HIGH, FIRST_SEEN, LAST_SEEN, TOTAL_RECORDS)
+                VALUES (s.PRODUCT_ID, s.OVERALL_AVG, s.ALL_TIME_LOW, s.ALL_TIME_HIGH, s.FIRST_SEEN, s.LAST_SEEN, s.TOTAL_RECORDS)
             WHEN MATCHED THEN UPDATE SET
-                OVERALL_AVG   = s.overall_avg,
-                ALL_TIME_LOW  = s.all_time_low,
-                ALL_TIME_HIGH = s.all_time_high,
-                LAST_SEEN     = s.last_seen,
-                TOTAL_RECORDS = s.total_records
+                OVERALL_AVG = s.OVERALL_AVG, ALL_TIME_LOW = s.ALL_TIME_LOW,
+                ALL_TIME_HIGH = s.ALL_TIME_HIGH, FIRST_SEEN = s.FIRST_SEEN,
+                LAST_SEEN = s.LAST_SEEN, TOTAL_RECORDS = s.TOTAL_RECORDS,
+                UPDATED_AT = CURRENT_TIMESTAMP()
         """)
         cur.close()
 
