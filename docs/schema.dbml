@@ -17,7 +17,6 @@ Table raw_crawled_prices {
   price_text    varchar(100) [not null, note: '가격 원본 텍스트 ("1,234,500원", "₩1234500" 등)']
   brand         varchar(200) [note: '브랜드 원본 (없을 수 있음)']
   url           text         [not null]
-  stock_status  varchar(100) [note: '재고 상태 원본 텍스트 ("품절", "재고있음", null 등)']
   is_processed  boolean      [not null, default: false, note: 'staging 변환 완료 여부']
   processed_at  timestamptz  [note: 'staging 변환 시각']
   crawled_at    timestamptz  [not null, note: '크롤링 시각']
@@ -79,7 +78,6 @@ Table stg_daily_prices {
   product_id    bigint      [not null, ref: > stg_products.product_id]
   raw_id        bigint      [note: '원본 데이터 추적 (FK 아님, raw 삭제 시에도 유지)']
   price         bigint      [not null, note: 'KRW 정수 (문자열 → int 변환 완료)']
-  stock_status  varchar(20) [not null, default: 'unknown', note: 'in_stock | out_of_stock | unknown']
   crawled_at    timestamptz [not null]
 
   indexes {
@@ -94,7 +92,6 @@ Table stg_daily_prices {
 Table stg_latest_prices {
   product_id    bigint      [pk, ref: - stg_products.product_id]
   price         bigint      [not null, note: 'KRW']
-  stock_status  varchar(20) [not null, default: 'unknown']
   crawled_at    timestamptz [not null]
   updated_at    timestamptz [not null, default: `now()`, note: 'UPSERT 시 갱신. WHERE crawled_at < EXCLUDED.crawled_at 조건 사용']
 
@@ -136,7 +133,6 @@ Table analytics_daily_summary {
   max_price    bigint        [not null]
   avg_price    decimal(12,2) [not null]
   record_count int           [not null, note: '해당일 수집 횟수']
-  stock_status varchar(20)   [not null, note: '마지막 수집 시점 재고 상태']
 
   indexes {
     (product_id, price_date) [unique, note: '상품+날짜 중복 방지']

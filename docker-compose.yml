@@ -1,67 +1,11 @@
 services:
 
-  # --- Infrastructure ---
-
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-computer_price}
-      POSTGRES_USER: ${POSTGRES_USER:-computer_price}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-computer_price}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # --- Airflow ---
-
-  airflow:
-    build:
-      context: .
-      dockerfile: docker/airflow/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8081:8080"
-    volumes:
-      - ./src/airflow_dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-computer_price}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?AIRFLOW_SECRET_KEY must be set in .env}
-      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
-      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
-      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
-      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
-      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-COMPUTER_PRICE}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-      PYTHONPATH: /opt/airflow
-    command:
-      - bash
-      - -c
-      - |
-        airflow db migrate &&
-        airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD:?AIRFLOW_ADMIN_PASSWORD must be set in .env} --firstname Admin --lastname User --role Admin --email admin@local.dev || true &&
-        airflow webserver --port 8080 &
-        airflow scheduler
-
   # --- Dashboard ---
 
   dashboard:
     build:
       context: .
       dockerfile: docker/dashboard/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "8050:8050"
     volumes:
@@ -73,6 +17,3 @@ services:
       SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
       SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-COMPUTER_PRICE}
     restart: unless-stopped
-
-volumes:
-  postgres_data:

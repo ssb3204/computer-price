@@ -3,20 +3,6 @@
 from pydantic_settings import BaseSettings
 
 
-class PostgresSettings(BaseSettings):
-    model_config = {"env_prefix": "POSTGRES_"}
-
-    user: str
-    password: str
-    host: str = "postgres"
-    port: int = 5432
-    db: str = "computer_price"
-
-    @property
-    def url(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
-
-
 class SnowflakeSettings(BaseSettings):
     model_config = {"env_prefix": "SNOWFLAKE_"}
 
