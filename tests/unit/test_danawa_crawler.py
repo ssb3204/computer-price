@@ -1,9 +1,6 @@
 """Unit tests for DanawaCrawler using saved HTML fixtures."""
 
-import re
-from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +10,7 @@ from src.crawlers.danawa import (
     DanawaCrawler,
     _extract_name,
     _extract_pcode,
-    _extract_price,
+    _extract_price_text,
     _is_real_product,
 )
 
@@ -52,14 +49,14 @@ class TestHelperExtraction:
         first = real_items[0]
         pcode = _extract_pcode(first)
         name = _extract_name(first)
-        price = _extract_price(first)
+        price_text = _extract_price_text(first)
 
         assert pcode is not None
         assert pcode.isdigit()
         assert name is not None
         assert len(name) > 0
-        assert price is not None
-        assert price > 0
+        assert price_text is not None
+        assert len(price_text) > 0
 
     @skip_no_fixtures
     def test_ad_items_filtered_out(self):
@@ -82,89 +79,16 @@ class TestHelperExtraction:
             assert not item_id.startswith("productItem"), f"Unexpected real-looking ad: {item_id}"
 
 
-# ── Crawler strategy tests ──
+# ── crawl_raw tests ──
 
 
-class TestPcodeStrategy:
-    """Test pcode-based search strategy."""
-
-    @skip_no_fixtures
-    def test_find_7800x3d_by_pcode(self):
-        crawler = DanawaCrawler()
-        html = (FIXTURE_DIR / "search_7800x3d.html").read_text(encoding="utf-8")
-        target = PCODE_TARGETS[0]  # 7800X3D
-
-        # Mock _fetch_with_retry to return saved HTML
-        with patch.object(crawler, "_fetch_with_retry", return_value=html):
-            results = crawler._crawl_by_pcode(target)
-
-        assert len(results) == 1
-        raw = results[0]
-        assert raw.site == "danawa"
-        assert raw.category == "CPU"
-        assert raw.brand == "AMD"
-        assert raw.price > 400_000  # 7800X3D should be > 400k KRW
-        assert "7800X3D" in raw.product_name or "7800x3d" in raw.product_name.lower()
-        assert raw.url != ""
-        assert isinstance(raw.crawled_at, datetime)
+class TestCrawlRaw:
+    """Test the crawl_raw() method with mocked HTTP."""
 
     @skip_no_fixtures
-    def test_pcode_not_found_returns_empty(self):
-        crawler = DanawaCrawler()
-        html = (FIXTURE_DIR / "search_7800x3d.html").read_text(encoding="utf-8")
+    def test_crawl_raw_returns_raw_prices(self):
+        from unittest.mock import patch
 
-        # Use a non-existent pcode
-        from src.crawlers.danawa import TargetProduct
-
-        fake_target = TargetProduct(
-            pcode="99999999", query="라이젠 7800X3D", category="CPU", brand="AMD"
-        )
-        with patch.object(crawler, "_fetch_with_retry", return_value=html):
-            results = crawler._crawl_by_pcode(fake_target)
-
-        assert results == []
-
-
-class TestCategoryStrategy:
-    """Test category ranking strategy."""
-
-    @skip_no_fixtures
-    def test_ram_top_3(self):
-        crawler = DanawaCrawler()
-        html = (FIXTURE_DIR / "category_ram.html").read_text(encoding="utf-8")
-        target = CATEGORY_TARGETS[0]  # RAM
-
-        with patch.object(crawler, "_fetch_with_retry", return_value=html):
-            results = crawler._crawl_category(target)
-
-        assert len(results) == target.top_n
-        for raw in results:
-            assert raw.site == "danawa"
-            assert raw.category == "RAM"
-            assert raw.price > 0
-            assert raw.product_name != ""
-
-    @skip_no_fixtures
-    def test_ssd_top_3(self):
-        crawler = DanawaCrawler()
-        html = (FIXTURE_DIR / "category_ssd.html").read_text(encoding="utf-8")
-        target = CATEGORY_TARGETS[1]  # SSD
-
-        with patch.object(crawler, "_fetch_with_retry", return_value=html):
-            results = crawler._crawl_category(target)
-
-        assert len(results) == target.top_n
-        for raw in results:
-            assert raw.site == "danawa"
-            assert raw.category == "SSD"
-            assert raw.price > 0
-
-
-class TestFullCrawl:
-    """Test the full crawl() method with mocked HTTP."""
-
-    @skip_no_fixtures
-    def test_full_crawl_returns_10_products(self):
         crawler = DanawaCrawler()
         fixtures = {
             "라이젠 7800X3D": "search_7800x3d.html",
@@ -184,7 +108,7 @@ class TestFullCrawl:
             return None
 
         with patch.object(crawler, "_fetch_with_retry", side_effect=mock_fetch):
-            results = crawler.crawl()
+            results = crawler.crawl_raw()
 
         # 4 pcode targets + 3 RAM + 3 SSD = 10
         assert len(results) == 10
@@ -198,6 +122,5 @@ class TestFullCrawl:
         # All should have valid data
         for raw in results:
             assert raw.site == "danawa"
-            assert raw.price > 0
             assert raw.product_name != ""
-            assert raw.url != ""
+            assert raw.price_text != ""

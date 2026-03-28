@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 import requests
 
-from src.common.models import RawCrawledPrice, RawPrice
+from src.common.models import RawCrawledPrice
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +31,7 @@ class BaseCrawler(ABC):
     def site_name(self) -> str: ...
 
     @abstractmethod
-    def get_target_urls(self) -> list[str]: ...
-
-    @abstractmethod
-    def parse_page(self, html: str, url: str) -> list[RawPrice]: ...
-
-    def crawl(self) -> list[RawPrice]:
-        all_prices: list[RawPrice] = []
-        urls = self.get_target_urls()
-
-        for url in urls:
-            html = self._fetch_with_retry(url)
-            if html is None:
-                continue
-            try:
-                prices = self.parse_page(html, url)
-                all_prices.extend(prices)
-                logger.info("Parsed %d prices from %s", len(prices), url)
-            except (ValueError, TypeError, AttributeError, KeyError):
-                logger.exception("Failed to parse %s", url)
-
-        logger.info("Crawled %d total prices from %s", len(all_prices), self.site_name)
-        return all_prices
+    def crawl_raw(self) -> list[RawCrawledPrice]: ...
 
     def _fetch_with_retry(self, url: str) -> str | None:
         for attempt in range(MAX_RETRIES):

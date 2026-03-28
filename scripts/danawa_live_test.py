@@ -1,11 +1,11 @@
-"""Step 5: Live crawl test — runs DanawaCrawler against real Danawa pages."""
+"""Live crawl test — runs DanawaCrawler against real Danawa pages."""
 
 from src.crawlers.danawa import DanawaCrawler
 
 
 def main() -> None:
     crawler = DanawaCrawler()
-    results = crawler.crawl()
+    results = crawler.crawl_raw()
 
     print(f"\n{'='*60}")
     print(f"Total products crawled: {len(results)}")
@@ -13,7 +13,7 @@ def main() -> None:
 
     for i, raw in enumerate(results, 1):
         print(
-            f"  [{i:2d}] {raw.category:4s} | {raw.price:>12,}원 | {raw.product_name[:50]}"
+            f"  [{i:2d}] {raw.category:4s} | {raw.price_text:>15s} | {raw.product_name[:50]}"
         )
 
     # Validation

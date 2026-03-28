@@ -6,17 +6,6 @@ from decimal import Decimal
 
 
 @dataclass(frozen=True)
-class RawPrice:
-    product_name: str
-    category: str
-    brand: str | None
-    site: str  # 'danawa' | 'compuzone' | 'pc_estimate'
-    price: int  # KRW
-    url: str
-    crawled_at: datetime
-
-
-@dataclass(frozen=True)
 class RawCrawledPrice:
     """Layer 1 (Raw): 크롤러가 수집한 원본 데이터. 가공 없음."""
     site: str             # 'danawa' | 'compuzone' | 'pc_estimate'
