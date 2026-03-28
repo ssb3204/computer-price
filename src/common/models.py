@@ -6,16 +6,6 @@ from decimal import Decimal
 
 
 @dataclass(frozen=True)
-class Product:
-    product_id: str
-    name: str
-    category: str  # 'CPU', 'GPU', 'RAM', 'SSD', 'Mainboard'
-    brand: str | None
-    model_number: str | None
-    normalized_name: str
-
-
-@dataclass(frozen=True)
 class RawPrice:
     product_name: str
     category: str
@@ -34,21 +24,6 @@ class RawCrawledPrice:
     product_name: str     # 상품명 원본 (특수문자, 공백 그대로)
     price_text: str       # 가격 원본 텍스트 ("1,234,500원" 등)
     brand: str | None
-    url: str
-    crawled_at: datetime
-
-
-@dataclass(frozen=True)
-class PriceChange:
-    change_id: str
-    product_id: str
-    product_name: str
-    category: str
-    site: str
-    old_price: int | None
-    new_price: int
-    change_amount: int | None
-    change_pct: Decimal | None
     url: str
     crawled_at: datetime
 
