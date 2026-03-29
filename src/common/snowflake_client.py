@@ -1,9 +1,8 @@
-"""Snowflake connection and batch operations."""
+"""Snowflake connection factory."""
 
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
 
 import snowflake.connector
 from snowflake.connector import SnowflakeConnection
@@ -31,24 +30,3 @@ def get_connection(settings: SnowflakeSettings) -> Iterator[SnowflakeConnection]
         yield conn
     finally:
         conn.close()
-
-
-def batch_insert(
-    conn: SnowflakeConnection,
-    table: str,
-    columns: list[str],
-    rows: list[tuple[Any, ...]],
-) -> int:
-    if not rows:
-        return 0
-
-    placeholders = ", ".join(["%s"] * len(columns))
-    col_names = ", ".join(columns)
-    sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
-
-    cursor = conn.cursor()
-    try:
-        cursor.executemany(sql, rows)
-        return len(rows)
-    finally:
-        cursor.close()

@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -15,15 +14,3 @@ class RawCrawledPrice:
     brand: str | None
     url: str
     crawled_at: datetime
-
-
-@dataclass(frozen=True)
-class Alert:
-    alert_id: str
-    product_id: str
-    alert_type: str  # 'NEW_LOW' | 'NEW_HIGH' | 'PRICE_DROP' | 'PRICE_SPIKE'
-    site: str
-    old_price: int | None
-    new_price: int
-    change_pct: Decimal | None
-    created_at: datetime
