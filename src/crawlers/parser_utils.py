@@ -30,6 +30,31 @@ def parse_korean_price(text: str) -> int | None:
     return None
 
 
+CATEGORIES: tuple[str, ...] = ("CPU", "GPU", "RAM", "SSD")
+
+# ── 카테고리별 유효 가격 범위 (원) ──────────────────────────────────────────
+_PRICE_RANGE: dict[str, tuple[int, int]] = {
+    "CPU": (10_000, 3_000_000),
+    "GPU": (30_000, 6_000_000),
+    "RAM": (3_000, 1_000_000),
+    "SSD": (5_000, 2_000_000),
+}
+_DEFAULT_PRICE_RANGE: tuple[int, int] = (1_000, 10_000_000)
+
+
+def validate_price(price: int, category: str) -> bool:
+    """카테고리별 유효 가격 범위를 벗어난 이상치 여부 검사.
+
+    Returns:
+        True  — 정상 가격
+        False — 이상치 (0 이하, 범위 초과)
+    """
+    if price <= 0:
+        return False
+    lo, hi = _PRICE_RANGE.get(category, _DEFAULT_PRICE_RANGE)
+    return lo <= price <= hi
+
+
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "CPU": ["cpu", "프로세서", "라이젠", "ryzen", "코어", "core i"],
     "GPU": ["gpu", "그래픽카드", "지포스", "geforce", "라데온", "radeon", "rtx", "rx"],
