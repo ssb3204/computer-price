@@ -1,0 +1,57 @@
+name: CI 테스트
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  unit-tests:
+    name: 유닛 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -e ".[dev]"
+
+      - name: 유닛 테스트 실행
+        run: python -m pytest tests/unit/ -v -o "addopts="
+
+  integration-tests:
+    name: 통합 테스트 (Snowflake)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: unit-tests  # 유닛 테스트 통과 후에만 실행
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -e ".[dev]"
+
+      - name: 통합 테스트 실행
+        env:
+          SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE:  ${{ secrets.SNOWFLAKE_DATABASE }}
+        run: python -m pytest tests/integration/ -v -o "addopts=" -m integration
