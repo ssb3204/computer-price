@@ -186,12 +186,14 @@ def transform_staging(settings: SnowflakeSettings) -> int:
 
         cur.executemany(
             "MERGE INTO STG_PRODUCTS t "
-            "USING (SELECT %s AS SITE_ID, %s AS NAME) s "
+            "USING (SELECT %s AS SITE_ID, %s AS NAME, %s AS NEW_URL) s "
             "ON t.SITE_ID = s.SITE_ID AND t.NAME = s.NAME "
             "WHEN NOT MATCHED THEN INSERT (SITE_ID, CATEGORY_ID, NAME, BRAND, URL) "
-            "VALUES (%s, %s, %s, %s, %s) "
-            "WHEN MATCHED THEN UPDATE SET UPDATED_AT = CURRENT_TIMESTAMP()",
-            [(site_id, name, site_id, cat_id, name, brand, url)
+            "VALUES (%s, %s, %s, %s, s.NEW_URL) "
+            "WHEN MATCHED THEN UPDATE SET "
+            "URL = CASE WHEN s.NEW_URL != '' THEN s.NEW_URL ELSE t.URL END, "
+            "UPDATED_AT = CURRENT_TIMESTAMP()",
+            [(site_id, name, url or '', site_id, cat_id, name, brand)
              for _, site_id, cat_id, name, brand, url, _, _ in parsed],
         )
 
@@ -247,6 +249,7 @@ def transform_staging(settings: SnowflakeSettings) -> int:
 
 def detect_changes(settings: SnowflakeSettings) -> int:
     MIN_CHANGE_PCT = 1.0
+    MAX_CHANGE_PCT = 70.0   # 70% 초과 단일 변동은 데이터 이상치로 간주
     PRICE_DROP_PCT = -5.0
     PRICE_SPIKE_PCT = 10.0
 
@@ -287,6 +290,7 @@ def detect_changes(settings: SnowflakeSettings) -> int:
                   AND r.prev_price IS NOT NULL
                   AND r.PRICE != r.prev_price
                   AND ABS((r.PRICE - r.prev_price) / r.prev_price * 100) >= %s
+                  AND ABS((r.PRICE - r.prev_price) / r.prev_price * 100) <= %s
                   AND NOT EXISTS (
                       SELECT 1 FROM STAGING.STG_ALERTS a
                       WHERE a.DAILY_PRICE_ID = r.DAILY_PRICE_ID
@@ -308,7 +312,7 @@ def detect_changes(settings: SnowflakeSettings) -> int:
                     WHEN change_pct <= %s THEN 'PRICE_DROP'
                     WHEN change_pct >= %s THEN 'PRICE_SPIKE'
                   END IS NOT NULL
-        """, (MIN_CHANGE_PCT, PRICE_DROP_PCT, PRICE_SPIKE_PCT, PRICE_DROP_PCT, PRICE_SPIKE_PCT))
+        """, (MIN_CHANGE_PCT, MAX_CHANGE_PCT, PRICE_DROP_PCT, PRICE_SPIKE_PCT, PRICE_DROP_PCT, PRICE_SPIKE_PCT))
         alert_count = cur.rowcount
         cur.close()
 
