@@ -28,7 +28,6 @@ app.layout = dbc.Container([
             dbc.Nav([
                 dbc.NavLink("대시보드", href="/", active="exact"),
                 dbc.NavLink("전체 가격표", href="/prices", active="exact"),
-                dbc.NavLink("카테고리 요약", href="/categories", active="exact"),
                 dbc.NavLink("상품 통계", href="/stats", active="exact"),
                 dbc.NavLink("가격 추이", href="/trends", active="exact"),
                 dbc.NavLink("가격 알림", href="/alerts", active="exact"),

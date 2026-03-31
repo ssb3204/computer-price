@@ -28,7 +28,6 @@ from src.dashboard.helpers import (
     make_stats_table,
 )
 from src.dashboard.layouts.alerts import alerts_layout
-from src.dashboard.layouts.categories import categories_page
 from src.dashboard.layouts.overview import overview_page
 from src.dashboard.layouts.prices import prices_page
 from src.dashboard.layouts.stats import stats_page
@@ -78,8 +77,6 @@ def register_callbacks(app):
     def display_page(pathname):
         if pathname == "/prices":
             return prices_page()
-        if pathname == "/categories":
-            return categories_page()
         if pathname == "/stats":
             return stats_page()
         if pathname == "/trends":
@@ -157,30 +154,6 @@ def register_callbacks(app):
             df = df[df["site"] == site]
 
         return make_price_table(df)
-
-    # ── Categories ──
-
-    @app.callback(
-        Output("category-detail-table", "children"),
-        Input("refresh-interval", "n_intervals"),
-    )
-    def update_category_detail(_):
-        try:
-            with _get_conn() as conn:
-                df = get_category_price_summary(conn)
-        except Exception as e:
-            return db_error_ui(str(e))
-
-        if df.empty:
-            return html.P("데이터 없음", className="text-muted")
-
-        df.columns = ["카테고리", "상품수", "최저가", "최고가", "평균가"]
-        for col in ["최저가", "최고가", "평균가"]:
-            df[col] = df[col].apply(lambda x: f"{int(x):,}원" if x else "-")
-
-        return dbc.Table.from_dataframe(
-            df, bordered=True, hover=True, striped=True, color="dark"
-        )
 
     # ── Stats ──
 
@@ -343,8 +316,33 @@ def register_callbacks(app):
         if df.empty:
             return html.P("알림 없음", className="text-muted")
 
-        cards = []
+        from datetime import date as date_type
+        import pandas as pd
+
+        today = date_type.today()
+        yesterday = pd.Timestamp.today().normalize() - pd.Timedelta(days=1)
+
+        def _date_label(dt_str: str) -> str:
+            d = pd.Timestamp(dt_str).date()
+            if d == today:
+                return "오늘"
+            if d == yesterday.date():
+                return "어제"
+            return str(d)
+
+        df["_date_key"] = df["created_at"].apply(lambda x: pd.Timestamp(str(x)).date())
+        output = []
+        current_date = None
+
         for _, row in df.iterrows():
+            row_date = row["_date_key"]
+            if row_date != current_date:
+                current_date = row_date
+                output.append(
+                    html.H6(_date_label(str(row["created_at"])),
+                            className="text-secondary mt-3 mb-2 border-bottom pb-1")
+                )
+
             alert_type_raw = str(row["alert_type"])
             type_display = ALERT_TYPE_DISPLAY.get(alert_type_raw, alert_type_raw)
             type_class = ALERT_TYPE_CLASS.get(alert_type_raw, "")
@@ -357,9 +355,9 @@ def register_callbacks(app):
             new_price = f"{int(row['new_price']):,}원"
             change_pct = f"{float(row['change_pct']):+.1f}%" if row["change_pct"] is not None else "-"
 
-            created = str(row["created_at"])[:16]
+            created = str(row["created_at"])[11:16]
 
-            cards.append(dbc.Card(dbc.CardBody([
+            output.append(dbc.Card(dbc.CardBody([
                 dbc.Row([
                     dbc.Col([
                         html.Span(type_display, className=f"fw-bold {type_class}"),
@@ -377,7 +375,7 @@ def register_callbacks(app):
                 ]),
             ]), color="dark", className="mb-2"))
 
-        return cards
+        return output
 
     # ── Button Toggles ──
 
