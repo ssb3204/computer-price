@@ -37,26 +37,20 @@ def get_summary_stats(conn: SnowflakeConnection) -> dict:
     cur = conn.cursor()
     try:
         cur.execute("USE DATABASE COMPUTER_PRICE")
-        cur.execute("SELECT COUNT(*) FROM STAGING.STG_PRODUCTS")
-        total_products = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(DISTINCT CATEGORY_ID) FROM STAGING.STG_PRODUCTS")
-        total_categories = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(DISTINCT SITE_ID) FROM STAGING.STG_PRODUCTS")
-        total_sites = cur.fetchone()[0]
-
         cur.execute("""
-            SELECT COUNT(*) FROM STAGING.STG_DAILY_PRICES
-            WHERE CRAWLED_AT::DATE = CURRENT_DATE()
+            SELECT
+                (SELECT COUNT(*)               FROM STAGING.STG_PRODUCTS)          AS total_products,
+                (SELECT COUNT(DISTINCT CATEGORY_ID) FROM STAGING.STG_PRODUCTS)     AS total_categories,
+                (SELECT COUNT(DISTINCT SITE_ID)     FROM STAGING.STG_PRODUCTS)     AS total_sites,
+                (SELECT COUNT(*)               FROM STAGING.STG_DAILY_PRICES
+                 WHERE CRAWLED_AT::DATE = CURRENT_DATE())                           AS today_records
         """)
-        today_records = cur.fetchone()[0]
-
+        row = cur.fetchone()
         return {
-            "total_products": total_products,
-            "total_categories": total_categories,
-            "total_sites": total_sites,
-            "today_records": today_records,
+            "total_products":   row[0],
+            "total_categories": row[1],
+            "total_sites":      row[2],
+            "today_records":    row[3],
         }
     finally:
         cur.close()

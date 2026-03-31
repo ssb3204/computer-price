@@ -22,6 +22,7 @@ from src.dashboard.helpers import (
     ALERT_TYPE_DISPLAY,
     CATEGORIES,
     SITE_COLORS,
+    db_error_ui,
     empty_chart,
     make_price_table,
     make_stats_table,
@@ -96,10 +97,13 @@ def register_callbacks(app):
         Input("refresh-interval", "n_intervals"),
     )
     def update_overview(_):
-        with _get_conn() as conn:
-            stats = get_summary_stats(conn)
-            cat_df = get_category_price_summary(conn)
-            prices_df = get_latest_prices_all(conn)
+        try:
+            with _get_conn() as conn:
+                stats = get_summary_stats(conn)
+                cat_df = get_category_price_summary(conn)
+                prices_df = get_latest_prices_all(conn)
+        except Exception as e:
+            return db_error_ui(str(e)), db_error_ui(str(e)), db_error_ui(str(e))
 
         cards = dbc.Row([
             dbc.Col(dbc.Card(dbc.CardBody([
@@ -141,8 +145,11 @@ def register_callbacks(app):
          Input("price-site-filter", "data")],
     )
     def update_prices_table(category, site):
-        with _get_conn() as conn:
-            df = get_latest_prices_all(conn)
+        try:
+            with _get_conn() as conn:
+                df = get_latest_prices_all(conn)
+        except Exception as e:
+            return db_error_ui(str(e))
 
         if category and category != "ALL":
             df = df[df["category"] == category]
@@ -158,8 +165,11 @@ def register_callbacks(app):
         Input("refresh-interval", "n_intervals"),
     )
     def update_category_detail(_):
-        with _get_conn() as conn:
-            df = get_category_price_summary(conn)
+        try:
+            with _get_conn() as conn:
+                df = get_category_price_summary(conn)
+        except Exception as e:
+            return db_error_ui(str(e))
 
         if df.empty:
             return html.P("데이터 없음", className="text-muted")
@@ -179,8 +189,11 @@ def register_callbacks(app):
         Input("refresh-interval", "n_intervals"),
     )
     def update_stats(_):
-        with _get_conn() as conn:
-            df = get_product_stats(conn)
+        try:
+            with _get_conn() as conn:
+                df = get_product_stats(conn)
+        except Exception as e:
+            return db_error_ui(str(e))
         return make_stats_table(df)
 
     # ── Trends ──
@@ -196,8 +209,11 @@ def register_callbacks(app):
         if not search:
             return empty_chart("검색어를 입력하면 사이트별 가격 추이를 볼 수 있습니다"), []
 
-        with _get_conn() as conn:
-            df = get_price_trend(conn, category=category, search=search, days=days if days else None)
+        try:
+            with _get_conn() as conn:
+                df = get_price_trend(conn, category=category, search=search, days=days if days else None)
+        except Exception as e:
+            return empty_chart(f"연결 오류: {e}"), []
 
         if df.empty:
             return empty_chart(f'"{search}" 검색 결과 없음'), []
@@ -262,8 +278,11 @@ def register_callbacks(app):
          Input("trend-search-input", "value")],
     )
     def update_today_comparison(category, search):
-        with _get_conn() as conn:
-            df = get_today_crawl_comparison(conn, category=category, search=search)
+        try:
+            with _get_conn() as conn:
+                df = get_today_crawl_comparison(conn, category=category, search=search)
+        except Exception as e:
+            return db_error_ui(str(e))
 
         if df.empty:
             return html.P("오늘 크롤링 데이터 없음", className="text-muted")
@@ -315,8 +334,11 @@ def register_callbacks(app):
          Input("alerts-refresh-interval", "n_intervals")],
     )
     def update_alerts_table(alert_type, category, _):
-        with _get_conn() as conn:
-            df = get_alerts(conn, alert_type=alert_type, category=category)
+        try:
+            with _get_conn() as conn:
+                df = get_alerts(conn, alert_type=alert_type, category=category)
+        except Exception as e:
+            return db_error_ui(str(e))
 
         if df.empty:
             return html.P("알림 없음", className="text-muted")

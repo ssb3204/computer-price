@@ -4,6 +4,8 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import html
 
+from src.crawlers.parser_utils import CATEGORIES as _CATEGORIES_BASE
+
 # ── 상수 ──
 
 SITE_COLORS = {"다나와": "#3498db", "컴퓨존": "#e67e22", "견적왕": "#2ecc71"}
@@ -22,7 +24,41 @@ ALERT_TYPE_CLASS = {
     "PRICE_SPIKE": "text-danger",
 }
 
-CATEGORIES = ["ALL", "CPU", "GPU", "RAM", "SSD"]
+CATEGORIES = ["ALL", *_CATEGORIES_BASE]
+
+
+# ── UI 헬퍼 ──
+
+def db_error_ui(message: str = "데이터베이스 연결 실패") -> dbc.Alert:
+    """DB 연결/쿼리 오류 시 표시할 에러 배너."""
+    return dbc.Alert(
+        [
+            html.Strong("연결 오류: "),
+            message,
+        ],
+        color="danger",
+        className="mt-2",
+    )
+
+
+def empty_chart(message: str) -> go.Figure:
+    """빈 차트에 안내 메시지 표시."""
+    fig = go.Figure()
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        annotations=[{
+            "text": message,
+            "xref": "paper", "yref": "paper",
+            "x": 0.5, "y": 0.5,
+            "showarrow": False,
+            "font": {"size": 16, "color": "#aaa"},
+        }],
+    )
+    return fig
 
 
 # ── 테이블 빌더 ──
@@ -91,23 +127,3 @@ def make_stats_table(df):
 
     body = html.Tbody(body_rows)
     return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
-
-
-def empty_chart(message: str) -> go.Figure:
-    """빈 차트에 안내 메시지 표시."""
-    fig = go.Figure()
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis={"visible": False},
-        yaxis={"visible": False},
-        annotations=[{
-            "text": message,
-            "xref": "paper", "yref": "paper",
-            "x": 0.5, "y": 0.5,
-            "showarrow": False,
-            "font": {"size": 16, "color": "#aaa"},
-        }],
-    )
-    return fig

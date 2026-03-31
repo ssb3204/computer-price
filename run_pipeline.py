@@ -26,7 +26,7 @@ from src.common.models import RawCrawledPrice
 from src.common.snowflake_client import get_connection
 from src.crawlers.compuzone import CompuzoneCrawler
 from src.crawlers.danawa import DanawaCrawler
-from src.crawlers.parser_utils import parse_korean_price
+from src.crawlers.parser_utils import CATEGORIES, parse_korean_price, validate_price
 from src.crawlers.pc_estimate import PCEstimateCrawler
 
 logging.basicConfig(
@@ -116,7 +116,6 @@ def transform_staging(settings: SnowflakeSettings) -> int:
         "compuzone": ("https://www.compuzone.co.kr", "컴퓨존"),
         "pc_estimate": ("https://kjwwang.com", "견적왕"),
     }
-    CATEGORIES = ["CPU", "GPU", "RAM", "SSD"]
 
     with get_connection(settings) as conn:
         cur = conn.cursor()
@@ -157,10 +156,18 @@ def transform_staging(settings: SnowflakeSettings) -> int:
             return 0
 
         parsed = []
+        anomaly_count = 0
         for row in raw_rows:
             raw_id, site, category, product_name, price_text, brand, url, crawled_at = row
             price = parse_korean_price(price_text)
             if price is None:
+                continue
+            if not validate_price(price, category):
+                logger.warning(
+                    "[Staging] 이상치 가격 제외 — site=%s category=%s name=%s price=%d",
+                    site, category, product_name[:40], price,
+                )
+                anomaly_count += 1
                 continue
             site_id = site_map.get(site)
             cat_id = cat_map.get(category)
@@ -168,6 +175,9 @@ def transform_staging(settings: SnowflakeSettings) -> int:
                 continue
             cleaned_name = re.sub(r"\s+", " ", product_name.strip())
             parsed.append((raw_id, site_id, cat_id, cleaned_name, brand, url, price, crawled_at))
+
+        if anomaly_count:
+            logger.warning("[Staging] 이상치 총 %d건 제외", anomaly_count)
 
         if not parsed:
             logger.info("[Staging] 유효한 데이터 없음")
@@ -199,8 +209,11 @@ def transform_staging(settings: SnowflakeSettings) -> int:
 
         if daily_rows:
             cur.executemany(
-                "INSERT INTO STG_DAILY_PRICES (PRODUCT_ID, RAW_ID, PRICE, CRAWLED_AT) "
-                "VALUES (%s, %s, %s, %s)",
+                "MERGE INTO STG_DAILY_PRICES t "
+                "USING (SELECT %s AS PRODUCT_ID, %s AS RAW_ID, %s AS PRICE, %s AS CRAWLED_AT) s "
+                "ON t.PRODUCT_ID = s.PRODUCT_ID AND t.CRAWLED_AT = s.CRAWLED_AT "
+                "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, RAW_ID, PRICE, CRAWLED_AT) "
+                "VALUES (s.PRODUCT_ID, s.RAW_ID, s.PRICE, s.CRAWLED_AT)",
                 daily_rows,
             )
             cur.executemany(

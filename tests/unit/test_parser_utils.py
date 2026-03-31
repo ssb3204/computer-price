@@ -1,6 +1,8 @@
 """Tests for parser utilities."""
 
-from src.crawlers.parser_utils import normalize_product_name, parse_korean_price, classify_category
+import pytest
+
+from src.crawlers.parser_utils import classify_category, normalize_product_name, parse_korean_price, validate_price
 
 
 class TestNormalizeProductName:
@@ -53,3 +55,55 @@ class TestClassifyCategory:
 
     def test_unknown(self):
         assert classify_category("알 수 없는 제품") == "Other"
+
+
+class TestValidatePrice:
+    # CPU: 10_000 ~ 3_000_000
+    def test_cpu_valid(self):
+        assert validate_price(450_000, "CPU") is True
+
+    def test_cpu_zero(self):
+        assert validate_price(0, "CPU") is False
+
+    def test_cpu_negative(self):
+        assert validate_price(-1, "CPU") is False
+
+    def test_cpu_below_min(self):
+        assert validate_price(9_999, "CPU") is False
+
+    def test_cpu_boundary_low(self):
+        assert validate_price(10_000, "CPU") is True
+
+    def test_cpu_boundary_high(self):
+        assert validate_price(3_000_000, "CPU") is True
+
+    def test_cpu_above_max(self):
+        assert validate_price(3_000_001, "CPU") is False
+
+    # GPU: 30_000 ~ 6_000_000
+    def test_gpu_valid(self):
+        assert validate_price(1_500_000, "GPU") is True
+
+    def test_gpu_above_max(self):
+        assert validate_price(9_999_999, "GPU") is False
+
+    # RAM: 3_000 ~ 1_000_000
+    def test_ram_valid(self):
+        assert validate_price(50_000, "RAM") is True
+
+    def test_ram_below_min(self):
+        assert validate_price(100, "RAM") is False
+
+    # SSD: 5_000 ~ 2_000_000
+    def test_ssd_valid(self):
+        assert validate_price(120_000, "SSD") is True
+
+    def test_ssd_below_min(self):
+        assert validate_price(4_999, "SSD") is False
+
+    # 알 수 없는 카테고리: 기본 범위(1_000 ~ 10_000_000) 적용
+    def test_unknown_category_valid(self):
+        assert validate_price(500_000, "OTHER") is True
+
+    def test_unknown_category_zero(self):
+        assert validate_price(0, "OTHER") is False
