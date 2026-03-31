@@ -31,8 +31,8 @@ def test_load_raw_inserts_rows(snowflake_settings, snowflake_conn):
     assert count == 2
     cur = snowflake_conn.cursor()
     cur.execute(
-        "SELECT COUNT(*) FROM RAW.RAW_CRAWLED_PRICES WHERE PRODUCT_NAME LIKE %s",
-        (TEST_PREFIX + "%",),
+        "SELECT COUNT(*) FROM RAW.RAW_CRAWLED_PRICES WHERE PRODUCT_NAME IN (%s, %s)",
+        (f"{TEST_PREFIX}CPU_001", f"{TEST_PREFIX}CPU_002"),
     )
     assert cur.fetchone()[0] == 2
     cur.close()
