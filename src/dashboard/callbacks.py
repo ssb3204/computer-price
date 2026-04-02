@@ -1,14 +1,19 @@
 """대시보드 콜백 등록."""
 
+import json
+
 import dash
+import pandas as pd
 import dash_bootstrap_components as dbc
 import plotly.express as px
 from dash import html
-from dash.dependencies import Input, Output
+from dash.dependencies import ALL, Input, Output, State
 
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
+from src.crawlers.danawa import search_products
 from src.dashboard.data_access.snowflake_queries import (
+    add_watch_product,
     get_alerts,
     get_category_price_summary,
     get_latest_prices_all,
@@ -16,6 +21,8 @@ from src.dashboard.data_access.snowflake_queries import (
     get_product_stats,
     get_summary_stats,
     get_today_crawl_comparison,
+    get_watch_products,
+    remove_watch_product,
 )
 from src.dashboard.helpers import (
     ALERT_TYPE_CLASS,
@@ -26,12 +33,14 @@ from src.dashboard.helpers import (
     empty_chart,
     make_price_table,
     make_stats_table,
+    send_slack_watch_change,
 )
 from src.dashboard.layouts.alerts import alerts_layout
 from src.dashboard.layouts.overview import overview_page
 from src.dashboard.layouts.prices import prices_page
 from src.dashboard.layouts.stats import stats_page
 from src.dashboard.layouts.trends import trends_page
+from src.dashboard.layouts.watchlist import watchlist_page
 
 _sf_settings = None
 
@@ -83,6 +92,8 @@ def register_callbacks(app):
             return trends_page()
         if pathname == "/alerts":
             return alerts_layout()
+        if pathname == "/watchlist":
+            return watchlist_page()
         return overview_page()
 
     # ── Overview ──
@@ -385,3 +396,179 @@ def register_callbacks(app):
     _register_button_toggle(app, "price-site-filter", "price-site-btn-", ["ALL", "다나와", "컴퓨존", "견적왕"], "ALL")
     _register_button_toggle(app, "alert-type-filter", "alert-btn-", ["ALL", "NEW_LOW", "NEW_HIGH", "PRICE_DROP", "PRICE_SPIKE"], "ALL")
     _register_button_toggle(app, "alert-category-filter", "alert-cat-btn-", CATEGORIES, "ALL")
+
+    # ── Watch list ──
+
+    @app.callback(
+        [Output("watch-search-store", "data"),
+         Output("watch-search-results", "children")],
+        Input("watch-search-btn", "n_clicks"),
+        [State("watch-category-select", "value"),
+         State("watch-search-input", "value")],
+        prevent_initial_call=True,
+    )
+    def do_watch_search(_, category, query):
+        if not query:
+            return [], dbc.Alert("검색어를 입력하세요.", color="warning")
+        results = search_products(query, max_results=10)
+        if not results:
+            return [], html.P("검색 결과 없음", className="text-muted")
+
+        stored = [
+            {"pcode": r.pcode, "product_name": r.product_name, "url": r.url}
+            for r in results
+        ]
+        cards = [
+            dbc.Card(dbc.CardBody(
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(r["product_name"][:80], className="text-light fw-bold"),
+                        html.Small(f"pcode: {r['pcode']}", className="text-muted"),
+                    ], width=10),
+                    dbc.Col(
+                        dbc.Button(
+                            "추가",
+                            id={"type": "watch-add-btn", "index": i},
+                            color="success", size="sm",
+                        ),
+                        width=2, className="text-end d-flex align-items-center justify-content-end",
+                    ),
+                ])
+            ), color="dark", className="mb-2")
+            for i, r in enumerate(stored)
+        ]
+        return stored, cards
+
+    @app.callback(
+        Output("watch-list-table", "children"),
+        Input("watch-refresh-trigger", "data"),
+    )
+    def load_watch_list(_):
+        try:
+            with _get_conn() as conn:
+                df = get_watch_products(conn)
+        except Exception as e:
+            return db_error_ui(str(e))
+
+        if df.empty:
+            return html.P("크롤링 대상이 없습니다.", className="text-muted")
+
+        rows = []
+        for _, row in df.iterrows():
+            watch_id = str(int(row["id"]))
+            _pname = row.get("product_name")
+            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
+            rows.append(html.Tr([
+                html.Td(row["category"]),
+                html.Td(row.get("brand") or "-"),
+                html.Td(display_name),
+                html.Td(str(row.get("added_at", ""))[:10]),
+                html.Td(
+                    dbc.Button(
+                        "삭제",
+                        id={"type": "watch-del-btn", "index": watch_id},
+                        color="danger", size="sm",
+                    )
+                ),
+            ]))
+
+        header = html.Thead(html.Tr([
+            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
+            html.Th("추가일"), html.Th(""),
+        ]))
+        return dbc.Table([header, html.Tbody(rows)],
+                         bordered=True, hover=True, striped=True, color="dark")
+
+    # ── 추가 버튼 처리 ──
+    @app.callback(
+        Output("watch-refresh-trigger", "data", allow_duplicate=True),
+        Input({"type": "watch-add-btn", "index": ALL}, "n_clicks"),
+        [
+            State("watch-search-store", "data"),
+            State("watch-category-select", "value"),
+            State("watch-refresh-trigger", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_watch_add(add_clicks, search_results, category, current_trigger):
+        ctx = dash.callback_context
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            raise dash.exceptions.PreventUpdate
+
+        triggered_prop = ctx.triggered[0]["prop_id"]
+        btn_idx = json.loads(triggered_prop.split(".")[0])["index"]
+
+        try:
+            with _get_conn() as conn:
+                if search_results:
+                    product = search_results[int(btn_idx)]
+                    add_watch_product(
+                        conn,
+                        query=product["product_name"],
+                        pcode=product["pcode"],
+                        product_name=product["product_name"],
+                        category=category or "기타",
+                        brand=None,
+                    )
+                    df_after = get_watch_products(conn)
+                    send_slack_watch_change("추가", product, df_after)
+        except Exception:
+            pass
+
+        return (current_trigger or 0) + 1
+
+    # ── 삭제 버튼 → 모달 열기 ──
+    @app.callback(
+        [Output("watch-del-confirm-modal", "is_open"),
+         Output("watch-pending-del-id", "data")],
+        Input({"type": "watch-del-btn", "index": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_del_modal(del_clicks):
+        ctx = dash.callback_context
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            raise dash.exceptions.PreventUpdate
+
+        triggered_prop = ctx.triggered[0]["prop_id"]
+        watch_id = json.loads(triggered_prop.split(".")[0])["index"]
+        return True, watch_id
+
+    # ── 모달 확인/취소 ──
+    @app.callback(
+        [Output("watch-del-confirm-modal", "is_open", allow_duplicate=True),
+         Output("watch-refresh-trigger", "data", allow_duplicate=True)],
+        [Input("watch-del-confirm-btn", "n_clicks"),
+         Input("watch-del-cancel-btn", "n_clicks")],
+        [State("watch-pending-del-id", "data"),
+         State("watch-refresh-trigger", "data")],
+        prevent_initial_call=True,
+    )
+    def handle_del_confirm(confirm_clicks, cancel_clicks, watch_id, current_trigger):
+        ctx = dash.callback_context
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            raise dash.exceptions.PreventUpdate
+
+        triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if triggered_id == "watch-del-cancel-btn":
+            return False, dash.no_update
+
+        if watch_id is None:
+            return False, dash.no_update
+
+        try:
+            with _get_conn() as conn:
+                df_before = get_watch_products(conn)
+                deleted_rows = df_before[df_before["id"] == int(watch_id)]
+                remove_watch_product(conn, int(watch_id))
+                df_after = get_watch_products(conn)
+                if not deleted_rows.empty:
+                    r = deleted_rows.iloc[0]
+                    send_slack_watch_change("삭제", {
+                        "product_name": r.get("product_name") or r["query"],
+                        "pcode": r["pcode"],
+                        "category": r["category"],
+                    }, df_after)
+        except Exception:
+            pass
+
+        return False, (current_trigger or 0) + 1

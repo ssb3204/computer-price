@@ -1,10 +1,16 @@
 """대시보드 공유 헬퍼 함수 및 상수."""
 
+import logging
+import os
+
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
+import requests as _requests
 from dash import html
 
 from src.crawlers.parser_utils import CATEGORIES as _CATEGORIES_BASE
+
+logger = logging.getLogger(__name__)
 
 # ── 상수 ──
 
@@ -94,6 +100,45 @@ def make_price_table(df, max_rows=None):
 
     body = html.Tbody(body_rows)
     return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
+
+
+def send_slack_watch_change(action: str, product_info: dict, watch_list_df) -> None:
+    """Watch list 추가/삭제 시 Slack Incoming Webhook으로 알림 전송.
+
+    Args:
+        action: "추가" 또는 "삭제"
+        product_info: {"product_name", "pcode", "category"} 키를 가진 dict
+        watch_list_df: 변경 후 현재 watch list DataFrame
+    """
+    webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return
+
+    name = product_info.get("product_name") or product_info.get("query", "")
+    pcode = product_info.get("pcode", "")
+    category = product_info.get("category", "")
+    action_icon = "➕" if action == "추가" else "➖"
+
+    if watch_list_df.empty:
+        list_text = "  (없음)"
+    else:
+        lines = [
+            f"  • [{row['category']}] {row.get('product_name') or row['query']} (pcode: {row['pcode']})"
+            for _, row in watch_list_df.iterrows()
+        ]
+        list_text = "\n".join(lines)
+
+    text = (
+        f"{action_icon} *크롤링 대상 {action}*\n"
+        f"상품: {name}  (pcode: {pcode})\n"
+        f"카테고리: {category}\n\n"
+        f"*현재 크롤링 대상 ({len(watch_list_df)}개):*\n{list_text}"
+    )
+
+    try:
+        _requests.post(webhook_url, json={"text": text}, timeout=10)
+    except Exception as exc:
+        logger.warning("Slack 알림 전송 실패: %s", exc)
 
 
 def make_stats_table(df):
