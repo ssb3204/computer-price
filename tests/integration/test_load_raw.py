@@ -1,4 +1,4 @@
-"""Integration test: load_raw() — RAW_CRAWLED_PRICES 적재 검증."""
+"""Integration test: load_raw() — CRAWLED_PRICES 적재 검증."""
 
 from datetime import datetime, timezone
 
@@ -23,7 +23,7 @@ def _make_raw(name: str, price: str = "100,000원") -> RawCrawledPrice:
 
 @pytest.mark.integration
 def test_load_raw_inserts_rows(snowflake_settings, snowflake_conn):
-    """load_raw()가 RAW_CRAWLED_PRICES에 데이터를 적재하는지 확인."""
+    """load_raw()가 CRAWLED_PRICES에 데이터를 적재하는지 확인."""
     raw = [_make_raw(f"{TEST_PREFIX}CPU_001"), _make_raw(f"{TEST_PREFIX}CPU_002")]
 
     count = load_raw(snowflake_settings, raw)
@@ -31,7 +31,7 @@ def test_load_raw_inserts_rows(snowflake_settings, snowflake_conn):
     assert count == 2
     cur = snowflake_conn.cursor()
     cur.execute(
-        "SELECT COUNT(*) FROM RAW.RAW_CRAWLED_PRICES WHERE PRODUCT_NAME LIKE %s",
+        "SELECT COUNT(*) FROM RAW.CRAWLED_PRICES WHERE PRODUCT_NAME LIKE %s",
         (TEST_PREFIX + "%",),
     )
     assert cur.fetchone()[0] == 2
@@ -48,7 +48,7 @@ def test_load_raw_idempotent(snowflake_settings, snowflake_conn):
 
     cur = snowflake_conn.cursor()
     cur.execute(
-        "SELECT COUNT(*) FROM RAW.RAW_CRAWLED_PRICES WHERE PRODUCT_NAME = %s",
+        "SELECT COUNT(*) FROM RAW.CRAWLED_PRICES WHERE PRODUCT_NAME = %s",
         (f"{TEST_PREFIX}CPU_DUPE",),
     )
     assert cur.fetchone()[0] == 1

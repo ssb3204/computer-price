@@ -43,29 +43,29 @@ def test_full_pipeline_data_flows_through_all_layers(snowflake_settings, snowfla
 
     # RAW 확인
     cur.execute(
-        "SELECT COUNT(*) FROM RAW.RAW_CRAWLED_PRICES WHERE PRODUCT_NAME = %s",
+        "SELECT COUNT(*) FROM RAW.CRAWLED_PRICES WHERE PRODUCT_NAME = %s",
         (name,),
     )
     assert cur.fetchone()[0] == 1, "RAW 레이어 데이터 없음"
 
     # STAGING 확인
     cur.execute(
-        "SELECT COUNT(*) FROM STAGING.STG_PRODUCTS WHERE NAME = %s", (name,)
+        "SELECT COUNT(*) FROM STAGING.PRODUCTS WHERE PRODUCT_NAME = %s", (name,)
     )
-    assert cur.fetchone()[0] == 1, "STG_PRODUCTS 데이터 없음"
+    assert cur.fetchone()[0] == 1, "PRODUCTS 데이터 없음"
 
     cur.execute("""
-        SELECT COUNT(*) FROM STAGING.STG_DAILY_PRICES dp
-        JOIN STAGING.STG_PRODUCTS p ON dp.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        SELECT COUNT(*) FROM STAGING.PRICE_HISTORY dp
+        JOIN STAGING.PRODUCTS p ON dp.PRODUCT_ID = p.PRODUCT_ID
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
-    assert cur.fetchone()[0] >= 1, "STG_DAILY_PRICES 데이터 없음"
+    assert cur.fetchone()[0] >= 1, "PRICE_HISTORY 데이터 없음"
 
     # ANALYTICS 확인
     cur.execute("""
         SELECT COUNT(*) FROM ANALYTICS.PRODUCT_STATS ps
-        JOIN STAGING.STG_PRODUCTS p ON ps.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        JOIN STAGING.PRODUCTS p ON ps.PRODUCT_ID = p.PRODUCT_ID
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
     assert cur.fetchone()[0] == 1, "PRODUCT_STATS 데이터 없음"
 
@@ -90,11 +90,11 @@ def test_full_pipeline_price_change_detected(snowflake_settings, snowflake_conn)
 
     cur = snowflake_conn.cursor()
     cur.execute("""
-        SELECT a.ALERT_TYPE, ps.ALL_TIME_LOW, ps.ALL_TIME_HIGH
-        FROM STAGING.STG_ALERTS a
-        JOIN STAGING.STG_PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
+        SELECT a.ALERT_TYPE, ps.MIN_PRICE_EVER, ps.MAX_PRICE_EVER
+        FROM STAGING.PRICE_ALERTS a
+        JOIN STAGING.PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
         JOIN ANALYTICS.PRODUCT_STATS ps ON ps.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
     row = cur.fetchone()
     cur.close()
@@ -102,5 +102,5 @@ def test_full_pipeline_price_change_detected(snowflake_settings, snowflake_conn)
     assert row is not None, "알림이 생성되지 않음"
     # NEW_HIGH가 PRICE_SPIKE보다 우선순위 높음 (detect_changes CASE 순서)
     assert row[0] in ("NEW_HIGH", "PRICE_SPIKE"), f"예상치 못한 alert_type: {row[0]}"
-    assert row[1] == 100000  # ALL_TIME_LOW
-    assert row[2] == 200000  # ALL_TIME_HIGH
+    assert row[1] == 100000  # MIN_PRICE_EVER
+    assert row[2] == 200000  # MAX_PRICE_EVER

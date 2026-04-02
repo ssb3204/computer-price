@@ -43,9 +43,9 @@ def test_detect_changes_price_drop(snowflake_settings, snowflake_conn):
     assert alert_count >= 1
     cur = snowflake_conn.cursor()
     cur.execute("""
-        SELECT a.ALERT_TYPE FROM STAGING.STG_ALERTS a
-        JOIN STAGING.STG_PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        SELECT a.ALERT_TYPE FROM STAGING.PRICE_ALERTS a
+        JOIN STAGING.PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
     rows = cur.fetchall()
     cur.close()
@@ -71,9 +71,9 @@ def test_detect_changes_price_spike(snowflake_settings, snowflake_conn):
 
     cur = snowflake_conn.cursor()
     cur.execute("""
-        SELECT a.ALERT_TYPE FROM STAGING.STG_ALERTS a
-        JOIN STAGING.STG_PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        SELECT a.ALERT_TYPE FROM STAGING.PRICE_ALERTS a
+        JOIN STAGING.PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
     rows = cur.fetchall()
     cur.close()
@@ -99,9 +99,9 @@ def test_detect_changes_no_alert_small_change(snowflake_settings, snowflake_conn
 
     cur = snowflake_conn.cursor()
     cur.execute("""
-        SELECT COUNT(*) FROM STAGING.STG_ALERTS a
-        JOIN STAGING.STG_PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.NAME = %s
+        SELECT COUNT(*) FROM STAGING.PRICE_ALERTS a
+        JOIN STAGING.PRODUCTS p ON a.PRODUCT_ID = p.PRODUCT_ID
+        WHERE p.PRODUCT_NAME = %s
     """, (name,))
     assert cur.fetchone()[0] == 0
     cur.close()
