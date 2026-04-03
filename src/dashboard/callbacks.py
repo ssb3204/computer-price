@@ -1,5 +1,7 @@
 """대시보드 콜백 등록."""
 
+import logging
+
 import dash
 import dash_bootstrap_components as dbc
 import plotly.express as px
@@ -33,6 +35,8 @@ from src.dashboard.layouts.overview import overview_page
 from src.dashboard.layouts.prices import prices_page
 from src.dashboard.layouts.stats import stats_page
 from src.dashboard.layouts.trends import trends_page
+
+logger = logging.getLogger(__name__)
 
 _sf_settings = None
 
@@ -103,7 +107,9 @@ def register_callbacks(app):
                 cat_df = get_category_price_summary(conn)
                 prices_df = get_latest_prices_all(conn)
         except Exception as e:
-            return db_error_ui(str(e)), db_error_ui(str(e)), db_error_ui(str(e))
+            logger.exception("Overview 데이터 로드 실패")
+            err = db_error_ui()
+            return err, err, err
 
         cards = dbc.Row([
             dbc.Col(dbc.Card(dbc.CardBody([
@@ -149,7 +155,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_latest_prices_all(conn)
         except Exception as e:
-            return db_error_ui(str(e))
+            logger.exception("가격표 데이터 로드 실패")
+            return db_error_ui()
 
         if category and category != "ALL":
             df = df[df["category"] == category]
@@ -169,7 +176,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_category_price_summary(conn)
         except Exception as e:
-            return db_error_ui(str(e))
+            logger.exception("카테고리 데이터 로드 실패")
+            return db_error_ui()
 
         if df.empty:
             return html.P("데이터 없음", className="text-muted")
@@ -193,7 +201,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_product_stats(conn)
         except Exception as e:
-            return db_error_ui(str(e))
+            logger.exception("상품 통계 데이터 로드 실패")
+            return db_error_ui()
         return make_stats_table(df)
 
     # ── Trends ──
@@ -213,7 +222,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_price_trend(conn, category=category, search=search, days=days if days else None)
         except Exception as e:
-            return empty_chart(f"연결 오류: {e}"), []
+            logger.exception("가격 추이 데이터 로드 실패")
+            return empty_chart("데이터베이스 연결 실패"), []
 
         if df.empty:
             return empty_chart(f'"{search}" 검색 결과 없음'), []
@@ -282,7 +292,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_today_crawl_comparison(conn, category=category, search=search)
         except Exception as e:
-            return db_error_ui(str(e))
+            logger.exception("오늘 크롤링 비교 데이터 로드 실패")
+            return db_error_ui()
 
         if df.empty:
             return html.P("오늘 크롤링 데이터 없음", className="text-muted")
@@ -338,7 +349,8 @@ def register_callbacks(app):
             with _get_conn() as conn:
                 df = get_alerts(conn, alert_type=alert_type, category=category)
         except Exception as e:
-            return db_error_ui(str(e))
+            logger.exception("알림 데이터 로드 실패")
+            return db_error_ui()
 
         if df.empty:
             return html.P("알림 없음", className="text-muted")

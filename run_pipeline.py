@@ -319,6 +319,16 @@ def detect_changes(settings: SnowflakeSettings) -> int:
 # ── Step 5: Slack 전송 (크롤링 실패만) ──────────────────────────────────────
 
 
+def _sanitize_for_slack(text: str) -> str:
+    """Slack mrkdwn 인젝션 방지: HTML 엔티티 및 백틱 이스케이프."""
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("`", "'")
+    )
+
+
 def send_slack_failures(crawl_failures: list[dict]) -> int:
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
     if not webhook_url:
@@ -330,9 +340,10 @@ def send_slack_failures(crawl_failures: list[dict]) -> int:
 
     lines = [f"*⚠️ 크롤링 실패 — {len(crawl_failures)}개 사이트*\n"]
     for failure in crawl_failures:
+        safe_error = _sanitize_for_slack(str(failure["error"]))
         lines.append(
             f"🔴 *{failure['site_name']}* — {failure['failed_at']}\n"
-            f"    `{failure['error']}`"
+            f"    `{safe_error}`"
         )
 
     payload = {"text": "\n".join(lines)}

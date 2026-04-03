@@ -1,5 +1,6 @@
 """Dash web application — Snowflake 연동 대시보드."""
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -52,4 +53,5 @@ register_callbacks(app)
 server = app.server
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8050, debug=True)
+    debug_mode = os.environ.get("DASH_DEBUG", "false").lower() == "true"
+    app.run(host="0.0.0.0", port=8050, debug=debug_mode)
