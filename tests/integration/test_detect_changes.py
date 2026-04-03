@@ -63,8 +63,8 @@ def test_detect_changes_price_spike(snowflake_settings, snowflake_conn):
     load_raw(snowflake_settings, [_make_raw_at(name, "100,000원", T1)])
     transform_staging(snowflake_settings)
 
-    # T2: 200,000원으로 상승 (+100%)
-    load_raw(snowflake_settings, [_make_raw_at(name, "200,000원", T2)])
+    # T2: 160,000원으로 상승 (+60%, MAX_CHANGE_PCT=70% 범위 내)
+    load_raw(snowflake_settings, [_make_raw_at(name, "160,000원", T2)])
     transform_staging(snowflake_settings)
 
     detect_changes(snowflake_settings)

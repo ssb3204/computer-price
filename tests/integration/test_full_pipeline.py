@@ -82,8 +82,8 @@ def test_full_pipeline_price_change_detected(snowflake_settings, snowflake_conn)
     transform_staging(snowflake_settings)
     aggregate_analytics(snowflake_settings)
 
-    # 2차 실행: 200,000원 (+100%)
-    load_raw(snowflake_settings, [_make_raw_at(name, "200,000원", T2)])
+    # 2차 실행: 160,000원 (+60%, MAX_CHANGE_PCT=70% 범위 내)
+    load_raw(snowflake_settings, [_make_raw_at(name, "160,000원", T2)])
     transform_staging(snowflake_settings)
     detect_changes(snowflake_settings)
     aggregate_analytics(snowflake_settings)
@@ -103,4 +103,4 @@ def test_full_pipeline_price_change_detected(snowflake_settings, snowflake_conn)
     # NEW_HIGH가 PRICE_SPIKE보다 우선순위 높음 (detect_changes CASE 순서)
     assert row[0] in ("NEW_HIGH", "PRICE_SPIKE"), f"예상치 못한 alert_type: {row[0]}"
     assert row[1] == 100000  # MIN_PRICE_EVER
-    assert row[2] == 200000  # MAX_PRICE_EVER
+    assert row[2] == 160000  # MAX_PRICE_EVER
