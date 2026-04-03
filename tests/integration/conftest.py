@@ -67,14 +67,14 @@ def snowflake_settings():
     return SnowflakeSettings()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def snowflake_conn(snowflake_settings):
     with get_connection(snowflake_settings) as conn:
         yield conn
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def cleanup_test_data(snowflake_settings):
-    _cleanup(snowflake_settings)  # 이전 테스트 잔여물 제거
+    _cleanup(snowflake_settings)  # 세션 시작 전 1회
     yield
-    _cleanup(snowflake_settings)  # 테스트 후 정리
+    _cleanup(snowflake_settings)  # 세션 종료 후 1회
