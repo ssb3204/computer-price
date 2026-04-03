@@ -1,8 +1,6 @@
-"""Crawler for shop.danawa.com — search & category pages.
+"""Crawler for shop.danawa.com — pcode 기반 검색.
 
-Two strategies:
-  1. Search by pcode (CPU, GPU) — exact product lookup via search page
-  2. Category ranking (RAM, SSD) — top-N from category listing page
+크롤링 대상은 Snowflake WATCHLIST 테이블에서 동적으로 로드.
 """
 
 import logging
@@ -10,48 +8,18 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import requests
+
 from bs4 import BeautifulSoup, Tag
+from snowflake.connector import SnowflakeConnection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import BaseCrawler, DEFAULT_HEADERS
 
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://search.danawa.com/dsearch.php"
-CATEGORY_URL = "https://prod.danawa.com/list/"
 PRODUCT_BASE = "https://prod.danawa.com/info/?pcode="
-
-
-@dataclass(frozen=True)
-class TargetProduct:
-    """A product to track by exact pcode from search results."""
-    pcode: str
-    query: str
-    category: str
-    brand: str
-
-
-@dataclass(frozen=True)
-class TargetCategory:
-    """A category page from which to take top-N products by ranking."""
-    cate_id: str
-    category: str
-    top_n: int
-
-
-# ── Target configuration ──
-
-PCODE_TARGETS: tuple[TargetProduct, ...] = (
-    TargetProduct(pcode="19627934", query="라이젠 7800X3D", category="CPU", brand="AMD"),
-    TargetProduct(pcode="77379452", query="RTX 5070", category="GPU", brand="NVIDIA"),
-    TargetProduct(pcode="76464143", query="RTX 5070 Ti", category="GPU", brand="NVIDIA"),
-    TargetProduct(pcode="77381483", query="RX 9070 XT", category="GPU", brand="AMD"),
-)
-
-CATEGORY_TARGETS: tuple[TargetCategory, ...] = (
-    TargetCategory(cate_id="112752", category="RAM", top_n=3),
-    TargetCategory(cate_id="112760", category="SSD", top_n=3),
-)
 
 
 def _is_real_product(item: Tag) -> bool:
@@ -95,17 +63,86 @@ def _extract_url(item: Tag) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class SearchResult:
+    """다나와 검색 결과 단일 항목."""
+    pcode: str
+    product_name: str
+    url: str
+
+
+def search_products(query: str, max_results: int = 10) -> list[SearchResult]:
+    """제품명으로 다나와를 검색해 매칭되는 상품 목록을 반환한다.
+
+    Args:
+        query: 검색어 (예: "RTX 5080", "라이젠 7800X3D")
+        max_results: 최대 반환 개수
+
+    Returns:
+        SearchResult 리스트 (최대 max_results개)
+    """
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+
+    url = f"{SEARCH_URL}?query={query}&tab=goods"
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+    except requests.RequestException as e:
+        logger.error("search_products 요청 실패: %s", e)
+        return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    results: list[SearchResult] = []
+
+    for item in soup.select("li.prod_item"):
+        if not _is_real_product(item):
+            continue
+        pcode = _extract_pcode(item)
+        name = _extract_name(item)
+        if pcode is None or name is None:
+            continue
+        product_url = _extract_url(item) or f"{PRODUCT_BASE}{pcode}"
+        results.append(SearchResult(pcode=pcode, product_name=name, url=product_url))
+        if len(results) >= max_results:
+            break
+
+    return results
+
+
 class DanawaCrawler(BaseCrawler):
+    def __init__(self, conn: SnowflakeConnection) -> None:
+        super().__init__()
+        self._conn = conn
+
     @property
     def site_name(self) -> str:
         return "danawa"
 
+    def _load_watch_products(self) -> list[dict]:
+        """WATCHLIST에서 활성 크롤링 대상 로드."""
+        cur = self._conn.cursor()
+        try:
+            cur.execute("USE DATABASE COMPUTER_PRICE")
+            cur.execute(
+                "SELECT QUERY, PCODE, CATEGORY, BRAND "
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE"
+            )
+            return [
+                {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}
+                for row in cur.fetchall()
+            ]
+        finally:
+            cur.close()
+
     def crawl_raw(self) -> list[RawCrawledPrice]:
-        """Raw 데이터 수집 — 가격을 원본 텍스트로 보존."""
+        """Raw 데이터 수집 — WATCHLIST 기반."""
+        targets = self._load_watch_products()
         all_raw: list[RawCrawledPrice] = []
 
-        for target in PCODE_TARGETS:
-            url = f"{SEARCH_URL}?query={target.query}&tab=goods"
+        for target in targets:
+            url = f"{SEARCH_URL}?query={target['query']}&tab=goods"
             html = self._fetch_with_retry(url)
             if html is None:
                 continue
@@ -116,49 +153,20 @@ class DanawaCrawler(BaseCrawler):
                 if not _is_real_product(item):
                     continue
                 pcode = _extract_pcode(item)
-                if pcode != target.pcode:
+                if pcode != target["pcode"]:
                     continue
                 name = _extract_name(item)
                 price_text = _extract_price_text(item)
                 if name is None or price_text is None:
                     break
-                product_url = _extract_url(item) or f"{PRODUCT_BASE}{target.pcode}"
+                product_url = _extract_url(item) or f"{PRODUCT_BASE}{target['pcode']}"
                 all_raw.append(RawCrawledPrice(
-                    site="danawa", category=target.category,
+                    site="danawa", category=target["category"],
                     product_name=name, price_text=price_text,
-                    brand=target.brand, url=product_url,
+                    brand=target["brand"], url=product_url,
                     crawled_at=now,
                 ))
                 break
-
-        for target in CATEGORY_TARGETS:
-            url = f"{CATEGORY_URL}?cate={target.cate_id}"
-            html = self._fetch_with_retry(url)
-            if html is None:
-                continue
-            soup = BeautifulSoup(html, "html.parser")
-            now = datetime.now(timezone.utc)
-            count = 0
-
-            for item in soup.select("li.prod_item"):
-                if not _is_real_product(item):
-                    continue
-                if count >= target.top_n:
-                    break
-                name = _extract_name(item)
-                price_text = _extract_price_text(item)
-                if name is None or price_text is None:
-                    continue
-                product_url = _extract_url(item) or (
-                    f"{PRODUCT_BASE}{_extract_pcode(item)}" if _extract_pcode(item) else ""
-                )
-                all_raw.append(RawCrawledPrice(
-                    site="danawa", category=target.category,
-                    product_name=name, price_text=price_text,
-                    brand=None, url=product_url,
-                    crawled_at=now,
-                ))
-                count += 1
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw

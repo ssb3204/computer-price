@@ -28,5 +28,5 @@ def prices_page():
                 dcc.Store(id="price-site-filter", data="ALL"),
             ], width="auto"),
         ], className="mb-4 align-items-center"),
-        html.Div(id="full-prices-table"),
+        dcc.Loading(type="circle", children=html.Div(id="full-prices-table")),
     ])
