@@ -31,7 +31,7 @@ def alerts_layout():
             ], width="auto"),
         ], className="mb-4 align-items-center"),
 
-        html.Div(id="alerts-table"),
+        dcc.Loading(type="circle", children=html.Div(id="alerts-table")),
 
         dcc.Interval(id="alerts-refresh-interval", interval=30_000, n_intervals=0),
     ])

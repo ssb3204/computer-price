@@ -42,17 +42,20 @@ def trends_page():
 
         # ── Line Chart ──
         dbc.Row([
-            dbc.Col(dcc.Graph(id="trend-chart"), width=12),
+            dbc.Col(
+                dcc.Loading(type="circle", children=dcc.Graph(id="trend-chart")),
+                width=12,
+            ),
         ], className="mb-4"),
 
         # ── Summary Cards ──
-        dbc.Row(id="trend-summary", className="mb-4"),
+        dcc.Loading(type="circle", children=dbc.Row(id="trend-summary", className="mb-4")),
 
         # ── Today Crawl Comparison ──
         dbc.Row([
             dbc.Col([
                 html.H5("오늘 크롤링 비교", className="mb-3"),
-                html.Div(id="today-comparison-table"),
+                dcc.Loading(type="circle", children=html.Div(id="today-comparison-table")),
             ], width=12),
         ]),
     ])
