@@ -86,7 +86,7 @@ class PCEstimateCrawler(BaseCrawler):
                     continue
 
                 href = name_tag.get("href", "")
-                product_url = f"{DETAIL_BASE}{href}" if href else ""
+                product_url = f"{DETAIL_BASE}{href}" if href.startswith("/") else ""
 
                 all_raw.append(RawCrawledPrice(
                     site="pc_estimate", category=target.category,

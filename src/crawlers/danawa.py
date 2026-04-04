@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://search.danawa.com/dsearch.php"
 PRODUCT_BASE = "https://prod.danawa.com/info/?pcode="
+ALLOWED_DOMAINS = {"danawa.com", "prod.danawa.com", "search.danawa.com", "shop.danawa.com"}
 
 
 def _is_real_product(item: Tag) -> bool:
@@ -59,7 +61,9 @@ def _extract_url(item: Tag) -> str:
     if link:
         href = link.get("href", "")
         if href.startswith("http"):
-            return href
+            netloc = urlparse(href).netloc
+            if netloc in ALLOWED_DOMAINS or any(netloc.endswith("." + d) for d in ALLOWED_DOMAINS):
+                return href
     return ""
 
 

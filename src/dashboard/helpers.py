@@ -164,9 +164,9 @@ def make_stats_table(df):
             html.Td(row["category"]),
             html.Td(row["site"]),
             html.Td(name_cell),
-            html.Td(f"{int(float(row['overall_avg'])):,}원"),
-            html.Td(f"{int(row['all_time_low']):,}원"),
-            html.Td(f"{int(row['all_time_high']):,}원"),
+            html.Td(f"{int(float(row['avg_price'])):,}원"),
+            html.Td(f"{int(row['min_price_ever']):,}원"),
+            html.Td(f"{int(row['max_price_ever']):,}원"),
             html.Td(str(row["total_records"])),
         ]))
 
