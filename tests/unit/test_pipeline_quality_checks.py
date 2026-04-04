@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from run_pipeline import _find_cross_site_anomalies, crawl_all_sites
+from src.pipeline.crawl import crawl_all_sites
+from src.pipeline.quality import _find_cross_site_anomalies
 
 
 # ── 교차 검증 순수 함수 ──────────────────────────────────────────────────────
@@ -94,10 +95,10 @@ class TestZeroCountCheck:
         pc.site_name = "pc_estimate"
 
         with (
-            patch("run_pipeline.get_connection", return_value=mock_ctx),
-            patch("run_pipeline.DanawaCrawler", return_value=danawa),
-            patch("run_pipeline.CompuzoneCrawler", return_value=compuzone),
-            patch("run_pipeline.PCEstimateCrawler", return_value=pc),
+            patch("src.pipeline.crawl.get_connection", return_value=mock_ctx),
+            patch("src.pipeline.crawl.DanawaCrawler", return_value=danawa),
+            patch("src.pipeline.crawl.CompuzoneCrawler", return_value=compuzone),
+            patch("src.pipeline.crawl.PCEstimateCrawler", return_value=pc),
         ):
             _, failures = crawl_all_sites(self._make_settings())
 
@@ -134,10 +135,10 @@ class TestZeroCountCheck:
         pc.site_name = "pc_estimate"
 
         with (
-            patch("run_pipeline.get_connection", return_value=mock_ctx),
-            patch("run_pipeline.DanawaCrawler", return_value=danawa),
-            patch("run_pipeline.CompuzoneCrawler", return_value=compuzone),
-            patch("run_pipeline.PCEstimateCrawler", return_value=pc),
+            patch("src.pipeline.crawl.get_connection", return_value=mock_ctx),
+            patch("src.pipeline.crawl.DanawaCrawler", return_value=danawa),
+            patch("src.pipeline.crawl.CompuzoneCrawler", return_value=compuzone),
+            patch("src.pipeline.crawl.PCEstimateCrawler", return_value=pc),
         ):
             all_raw, failures = crawl_all_sites(self._make_settings())
 
