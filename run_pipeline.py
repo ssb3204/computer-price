@@ -65,8 +65,8 @@ def main() -> int:
     # Step 3: Staging 변환
     t = time.monotonic()
     try:
-        transform_staging(settings)
-        tracker.record_step("transform", "SUCCESS", duration_sec=time.monotonic() - t)
+        count = transform_staging(settings)
+        tracker.record_step("transform", "SUCCESS", duration_sec=time.monotonic() - t, record_count=count)
     except Exception as exc:
         tracker.record_step("transform", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
         tracker.finish("FAILED", error_msg=str(exc))
@@ -75,16 +75,16 @@ def main() -> int:
     # Step 3.5: 교차 검증 (WARNING만, 파이프라인 계속)
     t = time.monotonic()
     try:
-        check_cross_site_prices(settings)
-        tracker.record_step("quality", "SUCCESS", duration_sec=time.monotonic() - t)
+        count = check_cross_site_prices(settings)
+        tracker.record_step("quality", "SUCCESS", duration_sec=time.monotonic() - t, record_count=count)
     except Exception as exc:
         tracker.record_step("quality", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
 
     # Step 4: 변경 감지
     t = time.monotonic()
     try:
-        detect_changes(settings)
-        tracker.record_step("detect", "SUCCESS", duration_sec=time.monotonic() - t)
+        alert_count = detect_changes(settings)
+        tracker.record_step("detect", "SUCCESS", duration_sec=time.monotonic() - t, record_count=alert_count)
     except Exception as exc:
         tracker.record_step("detect", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
 

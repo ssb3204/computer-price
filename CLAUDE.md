@@ -1,5 +1,9 @@
 # 컴퓨터 가격 모니터링 시스템
 
+## Language
+- Respond in Korean for explanations and documentation unless code/commands
+- Technical terms can remain in English
+
 ## 프로젝트 개요
 컴퓨터 부품 가격 비교 사이트 3곳(다나와, 컴퓨존, 견적왕)을 크롤링하여 일일 가격을 수집하고, 가격 변동을 시각화하는 웹 대시보드. 로컬 Docker Compose로 운영.
 
@@ -44,6 +48,14 @@ src/
 - Co-Authored-By 추가하지 않음
 - 테스트: `python -m pytest tests/ -v -o "addopts="` (pytest-cov 미설치 시)
 
+## Verification
+- After implementing fixes, verify actual behavior (run integration tests, check DB state), not just unit tests
+- Before schema/dbt changes, inspect the actual source data columns first
+
+## Scope Discipline
+- When user asks 'should I X?', answer the question — do not execute X
+- Confirm before running gh merge, force push, or destructive ops
+
 ## 기술적 주의사항
 - 다나와 크롤러: productItem* = 실제상품, adReaderProductItem*/adPointProductItem* = 광고
 - Frozen dataclass로 모든 DTO 정의
@@ -57,6 +69,10 @@ src/
 | Dashboard | localhost:8050 |
 | Airflow | localhost:8081 |
 | PostgreSQL | localhost:5432 (Airflow 메타DB) |
+
+## Environment
+- Desktop files go to the actual visible Desktop (check OneDrive redirection on Windows)
+- Confirm gh CLI and key deps (google-cloud-bigquery, etc.) are installed before scripting workflows
 
 ## 실행
 ```bash
