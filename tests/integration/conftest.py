@@ -59,6 +59,10 @@ def _cleanup(settings: SnowflakeSettings) -> None:
             "DELETE FROM RAW.CRAWLED_PRICES WHERE PRODUCT_NAME LIKE %s",
             (TEST_PREFIX + "%",),
         )
+        cur.execute(
+            "DELETE FROM RAW.TRANSFORM_FAILURES WHERE PRODUCT_NAME LIKE %s",
+            (TEST_PREFIX + "%",),
+        )
         cur.close()
 
 

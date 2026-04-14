@@ -41,18 +41,15 @@ def test_transform_staging_creates_daily_price(snowflake_settings, snowflake_con
 
 
 @pytest.mark.integration
-def test_transform_staging_marks_raw_processed(snowflake_settings, snowflake_conn):
-    """transform_staging() 후 RAW IS_PROCESSED = TRUE로 표시되는지 확인."""
+def test_transform_staging_consumes_stream(snowflake_settings, snowflake_conn):
+    """transform_staging() 후 Stream이 비어있는지 확인 (Stream 소비 검증)."""
     load_raw(snowflake_settings, [_make_raw(f"{TEST_PREFIX}SSD_001", "120,000원")])
     transform_staging(snowflake_settings)
 
     cur = snowflake_conn.cursor()
-    cur.execute(
-        "SELECT IS_PROCESSED FROM RAW.CRAWLED_PRICES WHERE PRODUCT_NAME LIKE %s",
-        (TEST_PREFIX + "%",),
-    )
-    rows = cur.fetchall()
-    assert all(row[0] is True for row in rows)
+    # SELECT만으로는 Stream이 소비되지 않음 — 0건이면 정상 소비된 것
+    cur.execute("SELECT COUNT(*) FROM RAW.CRAWLED_PRICES_STREAM")
+    assert cur.fetchone()[0] == 0, "transform 후 Stream에 미소비 레코드가 없어야 함"
     cur.close()
 
 
