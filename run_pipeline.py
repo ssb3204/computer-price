@@ -20,7 +20,7 @@ from src.pipeline.crawl import crawl_all_sites
 from src.pipeline.detect import detect_changes
 from src.pipeline.load_raw import load_raw
 from src.pipeline.observability import PipelineTracker
-from src.pipeline.quality import check_cross_site_prices
+from src.pipeline.quality import check_cross_site_prices, check_layer_consistency
 from src.pipeline.slack import send_slack_failures
 from src.pipeline.transform import transform_staging
 
@@ -72,11 +72,18 @@ def main() -> int:
         tracker.finish("FAILED", error_msg=str(exc))
         return 1
 
-    # Step 3.5: 교차 검증 (WARNING만, 파이프라인 계속)
+    # Step 3.5: 품질 검증 (교차검증 + 레이어 정합성, WARNING만, 파이프라인 계속)
     t = time.monotonic()
     try:
-        count = check_cross_site_prices(settings)
-        tracker.record_step("quality", "SUCCESS", duration_sec=time.monotonic() - t, record_count=count)
+        cross_issues = check_cross_site_prices(settings)
+        layer = check_layer_consistency(settings)
+        total_issues = cross_issues + layer.total_issues
+        q_status = "PARTIAL" if layer.total_issues > 0 else "SUCCESS"
+        tracker.record_step(
+            "quality", q_status,
+            duration_sec=time.monotonic() - t,
+            record_count=total_issues,
+        )
     except Exception as exc:
         tracker.record_step("quality", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
 

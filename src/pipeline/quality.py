@@ -1,7 +1,8 @@
-"""Step 3.5: 데이터 품질 교차 검증 — 동일 제품의 사이트 간 가격 편차 감지."""
+"""Step 3.5: 데이터 품질 검증 — 사이트 간 가격 편차 + 레이어 정합성 체크."""
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
@@ -75,3 +76,107 @@ def check_cross_site_prices(settings: SnowflakeSettings) -> int:
         logger.info("[교차검증] 이상 없음")
 
     return len(anomalies)
+
+
+@dataclass
+class LayerConsistencyResult:
+    """레이어 정합성 체크 결과."""
+    raw_count: int           # 오늘 Raw 수집 건수
+    staging_count: int       # 오늘 Staging 변환 건수
+    drop_count: int          # Raw → Staging 손실 건수
+    drop_rate: float         # 손실률 (%)
+    missing_analytics: int   # ANALYTICS.PRODUCT_STATS 미집계 상품 수
+    missing_latest: int      # STAGING.LATEST_PRICES 누락 상품 수
+
+    @property
+    def total_issues(self) -> int:
+        """임계값 초과 항목 수 (0이면 정상)."""
+        issues = 0
+        if self.drop_rate > 10.0:
+            issues += 1
+        issues += self.missing_analytics
+        issues += self.missing_latest
+        return issues
+
+
+def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResult:
+    """레이어 정합성 체크: Raw→Staging 손실률, Analytics/LATEST_PRICES 누락 상품.
+
+    임계값 초과 시 Slack WARNING을 보내지만 파이프라인은 계속 진행한다.
+
+    체크 항목:
+        1. Raw → Staging 손실률 > 10%: 파싱/이상치 제외로 과도한 드롭 발생
+        2. ANALYTICS.PRODUCT_STATS 누락: analytics 스텝 미실행 또는 버그
+        3. STAGING.LATEST_PRICES 누락: transform 스텝 불완전 적재
+    """
+    with get_connection(settings) as conn:
+        cur = conn.cursor()
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+
+        # 1. 오늘 Raw vs Staging 건수
+        cur.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM RAW.CRAWLED_PRICES
+                 WHERE CRAWLED_AT::DATE = CURRENT_DATE()) AS raw_count,
+                (SELECT COUNT(*) FROM STAGING.PRICE_HISTORY
+                 WHERE CRAWLED_AT::DATE = CURRENT_DATE()) AS staging_count
+        """)
+        row = cur.fetchone()
+        raw_count, staging_count = int(row[0]), int(row[1])
+
+        # 2. Analytics 미집계 상품 (PRODUCTS에 있지만 PRODUCT_STATS에 없음)
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM STAGING.PRODUCTS p
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ANALYTICS.PRODUCT_STATS ps
+                WHERE ps.PRODUCT_ID = p.PRODUCT_ID
+            )
+        """)
+        missing_analytics = int(cur.fetchone()[0])
+
+        # 3. LATEST_PRICES 누락 상품 (PRODUCTS에 있지만 LATEST_PRICES에 없음)
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM STAGING.PRODUCTS p
+            WHERE NOT EXISTS (
+                SELECT 1 FROM STAGING.LATEST_PRICES lp
+                WHERE lp.PRODUCT_ID = p.PRODUCT_ID
+            )
+        """)
+        missing_latest = int(cur.fetchone()[0])
+        cur.close()
+
+    drop_count = raw_count - staging_count
+    drop_rate = drop_count / raw_count * 100 if raw_count > 0 else 0.0
+
+    result = LayerConsistencyResult(
+        raw_count=raw_count,
+        staging_count=staging_count,
+        drop_count=drop_count,
+        drop_rate=drop_rate,
+        missing_analytics=missing_analytics,
+        missing_latest=missing_latest,
+    )
+
+    # 이슈 로깅 및 Slack 알림
+    issues: list[str] = []
+    if drop_rate > 10.0:
+        issues.append(f"Raw→Staging 손실률 {drop_rate:.1f}% ({drop_count}건 누락, Raw={raw_count}건)")
+    if missing_analytics > 0:
+        issues.append(f"Analytics 미집계 상품 {missing_analytics}개")
+    if missing_latest > 0:
+        issues.append(f"LATEST_PRICES 누락 상품 {missing_latest}개")
+
+    if issues:
+        lines = [f"*⚠️ [레이어 정합성] 이슈 {len(issues)}건*"] + [f"• {i}" for i in issues]
+        _send_slack_message("\n".join(lines))
+        logger.warning("[레이어 정합성] %s", " | ".join(issues))
+    else:
+        logger.info(
+            "[레이어 정합성] 정상 — Raw=%d → Staging=%d (손실률 %.1f%%), "
+            "Analytics 누락=%d, LATEST 누락=%d",
+            raw_count, staging_count, drop_rate, missing_analytics, missing_latest,
+        )
+
+    return result
