@@ -301,6 +301,90 @@ def remove_watch_product(conn: SnowflakeConnection, watch_id: int) -> None:
         cur.close()
 
 
+def get_pipeline_runs(conn: SnowflakeConnection, limit: int = 30) -> pd.DataFrame:
+    """파이프라인 실행 이력 (최근 N회)."""
+    sql = f"""
+        SELECT
+            RUN_ID,
+            STARTED_AT,
+            FINISHED_AT,
+            DURATION_SEC,
+            STATUS,
+            ERROR_MSG
+        FROM RAW.PIPELINE_RUNS
+        ORDER BY STARTED_AT DESC
+        LIMIT {limit}
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql)
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
+def get_pipeline_step_runs(conn: SnowflakeConnection, run_id: str) -> pd.DataFrame:
+    """특정 실행의 스텝별 상세."""
+    sql = """
+        SELECT
+            STEP_NAME,
+            STARTED_AT,
+            FINISHED_AT,
+            DURATION_SEC,
+            RECORD_COUNT,
+            STATUS,
+            ERROR_MSG
+        FROM RAW.PIPELINE_STEP_RUNS
+        WHERE RUN_ID = %s
+        ORDER BY STARTED_AT ASC
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql, (run_id,))
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
+def get_pipeline_duration_trend(conn: SnowflakeConnection, limit: int = 20) -> pd.DataFrame:
+    """실행시간 추이 + 스텝별 소요시간 (차트용)."""
+    sql = f"""
+        WITH runs AS (
+            SELECT RUN_ID, STARTED_AT, DURATION_SEC, STATUS
+            FROM RAW.PIPELINE_RUNS
+            ORDER BY STARTED_AT DESC
+            LIMIT {limit}
+        ),
+        steps AS (
+            SELECT s.RUN_ID, s.STEP_NAME, s.DURATION_SEC AS step_dur
+            FROM RAW.PIPELINE_STEP_RUNS s
+            JOIN runs r ON r.RUN_ID = s.RUN_ID
+        )
+        SELECT
+            r.RUN_ID,
+            r.STARTED_AT,
+            r.DURATION_SEC       AS total_dur,
+            r.STATUS,
+            s.STEP_NAME,
+            s.step_dur
+        FROM runs r
+        LEFT JOIN steps s ON s.RUN_ID = r.RUN_ID
+        ORDER BY r.STARTED_AT ASC, s.STEP_NAME
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql)
+        cols = [desc[0].lower() for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
+    finally:
+        cur.close()
+
+
 def get_category_price_summary(conn: SnowflakeConnection) -> pd.DataFrame:
     """카테고리별 가격 요약."""
     sql = """

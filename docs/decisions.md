@@ -62,6 +62,18 @@
 - **방식**: 사이트별 개별 try-except. 1개 사이트 실패해도 나머지 계속 진행
 - **알림**: 실패 시 Slack Webhook으로 사이트명/시간/에러 전송
 - **종료 코드**: 3개 사이트 전부 실패 시 exit 1, 일부 실패는 exit 0 (GitHub Actions 재실행 방지)
+- **설계 선택: try-except vs GitHub Actions 별도 job**
+  - 검토한 대안: 사이트별 GitHub Actions job 분리 (병렬 크롤링)
+  - 기각 이유:
+    1. job 간 Python 객체 공유 불가 → artifact 파일 경유 필요, 구조 복잡
+    2. job 기동 오버헤드(checkout + setup-python + pip install) 약 40~60초 × 3개 job → 병렬화 이득 상쇄
+    3. `needs` 의존성 설정 시 1개 job 실패 → transform job 미실행 (원래 문제 재발)
+    4. GitHub Actions 무료 한도를 job 수만큼 소모
+  - 실측 근거 (PIPELINE_STEP_RUNS 34회 기준):
+    - crawl 평균 44.2초 (3개 사이트 순차 합계)
+    - 병렬화 시 이론상 약 15초로 단축 가능하나, job 기동 오버헤드 40~60초에 상쇄됨
+    - 크롤링 대상이 수십 개 사이트로 늘어 crawl 시간이 수 분 이상이 되는 규모라면 job 분리가 유리
+    - 현재 3개 사이트 44초 수준에서는 단일 job + try-except가 더 효율적
 
 ---
 
@@ -75,6 +87,54 @@
 - **웹 대시보드 알림**: 가격 변동 이력 조회 (1% 이상 상승/하락, NEW_LOW/NEW_HIGH)
 - **Slack 알림**: 크롤링 실패만 (운영 이슈 즉시 인지 목적)
 - **이유**: 가격 변동은 참고용이므로 대시보드에서 확인. 크롤링 실패는 즉시 대응 필요
+
+---
+
+## Phase 7 — 파이프라인 옵저버빌리티 대시보드 + DQ 강화 (2026-04-12)
+
+### 파이프라인 모니터링 대시보드 (`/pipeline` 신규)
+- **문제**: `PIPELINE_RUNS` / `PIPELINE_STEP_RUNS` 테이블에 실행 이력이 쌓이지만 확인하려면 Snowflake 콘솔에서 직접 쿼리해야 함
+- **변경**: Dash 대시보드에 `/pipeline` 페이지 추가
+  - 요약 카드: 총 실행 횟수 / 성공률 / 마지막 실행 상태 + 시간
+  - 실행 시간 추이 라인 차트
+  - 스텝별 평균 소요시간 + 성공/실패 바 차트
+  - 실행 이력 테이블 (행 클릭 시 해당 실행의 스텝 상세 드릴다운)
+- **트레이드오프**: 대시보드 5분 자동 갱신 주기 — 실시간 모니터링이 아닌 운영 현황 파악 용도로 충분
+
+### B4: 레이어 정합성 체크 추가
+- **문제**: Raw→Staging 변환 중 손실이 발생해도 파이프라인이 조용히 통과. Analytics/LATEST_PRICES 누락 상품도 탐지 불가
+- **변경**: `check_layer_consistency()` 함수 추가 — quality 스텝에서 3가지 체크 수행
+  1. Raw vs Staging 건수 비교 → 손실률 > 10% 시 Slack 알림
+  2. `STAGING.PRODUCTS` vs `ANALYTICS.PRODUCT_STATS` 누락 상품 수
+  3. `STAGING.PRODUCTS` vs `STAGING.LATEST_PRICES` 누락 상품 수
+- **설계 결정**: 이슈 발견 시 파이프라인 중단 대신 Slack WARNING + 계속 진행
+  - 이유: 정합성 이슈가 있어도 나머지 데이터는 정상 처리 가능. 중단하면 모든 데이터를 못 씀
+- **결과**: 실제 검증 — Raw 64건, Staging 62건, 손실률 3.1% (임계값 10% 이내 정상). 단위 테스트 17개 추가
+- **손실 원인 분석**: `IS_PROCESSED=FALSE` 2건 조회 결과, `WesternDigital WD BLACK SN850X M.2 NVMe`가 다나와에서 RAM 카테고리로 잘못 분류되어 `validate_price(2,333,000, "RAM")` 실패 (RAM 상한 1,000,000원). 파이프라인이 의도대로 작동한 것으로 확인
+
+### 대시보드 가격 추이 페이지 개선
+- **상품 클릭 → 차트 연동 문제**: `dbc.Button` + 패턴매칭 콜백(`ALL`)으로 구현했으나 동적 테이블에서 `triggered_value`가 항상 None. 204 응답 반복
+  - **원인**: Dash 패턴매칭은 정적 렌더링에 최적화. 동적으로 생성된 컴포넌트에서 신뢰성 낮음
+  - **해결**: `dash_table.DataTable` + `active_cell` 콜백으로 교체. Dash 공식 셀 클릭 처리 방식
+- **순환 의존성 해결**: `update_today_comparison`에 `Input("trend-search-input")`이 있어 클릭→검색→테이블 갱신→클릭 루프 발생. search Input 제거, 테이블은 카테고리 필터만 반응하도록 분리
+- **차트 호버 개선**: 날짜·가격·사이트 외에 상품명 추가 (`hovertemplate` f-string)
+- **비교 테이블 정리**: 변동2/3/4 컬럼 제거 (변동1만 유지)
+
+---
+
+## 개선 필요 사항
+
+### IS_PROCESSED=FALSE 레코드 영구 누적 문제
+
+- **문제**: `parse_korean_price()` 또는 `validate_price()` 실패 레코드가 `RAW.CRAWLED_PRICES`에 `IS_PROCESSED=FALSE`로 영구 잔류. 이후 모든 파이프라인 실행마다 `WHERE IS_PROCESSED=FALSE` 조건으로 반복 조회되지만 결과는 동일하게 실패
+- **원인 구조**: MERGE 키가 `(SITE, CATEGORY, PRODUCT_NAME, CRAWLED_AT)` — 크롤링 A에서 실패한 레코드와 크롤링 B에서 성공한 레코드는 `CRAWLED_AT` 차이로 **별개 행**으로 존재. 성공 레코드(B)가 `IS_PROCESSED=TRUE`가 되어도, 실패 레코드(A)는 영구 `FALSE` 유지
+- **실제 사례**: `WesternDigital WD BLACK SN850X M.2 NVMe`가 다나와에서 RAM 카테고리로 잘못 분류 → `validate_price(2,333,000, "RAM")` 실패 (RAM 상한 1,000,000원). 해당 레코드는 이후 크롤링과 무관하게 매 실행마다 무의미하게 재조회됨
+- **개선 방향**:
+  1. `RAW.CRAWLED_PRICES`에 `IS_INVALID BOOLEAN DEFAULT FALSE` 컬럼 추가
+  2. `transform_staging()`에서 파싱/검증 실패 시 `IS_INVALID=TRUE`로 마킹
+  3. transform 쿼리 조건을 `WHERE IS_PROCESSED=FALSE AND (IS_INVALID IS NULL OR IS_INVALID=FALSE)`로 변경
+  4. 기존 누적된 실패 레코드는 `UPDATE SET IS_INVALID=TRUE WHERE IS_PROCESSED=FALSE AND CRAWLED_AT < CURRENT_DATE()`로 일괄 처리 가능
+- **트레이드오프**: `IS_INVALID=TRUE` 레코드는 데이터 감사(audit) 목적으로 삭제하지 않고 보존. "처리 실패"(`FALSE`)와 "처리 불가"(`IS_INVALID=TRUE`)를 명시적으로 구분
 
 ---
 
