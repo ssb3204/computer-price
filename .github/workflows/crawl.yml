@@ -13,6 +13,8 @@ jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: 코드 체크아웃

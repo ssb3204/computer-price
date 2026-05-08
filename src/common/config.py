@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class SnowflakeSettings(BaseSettings):
-    model_config = {"env_prefix": "SNOWFLAKE_"}
+    model_config = {"env_prefix": "SNOWFLAKE_", "env_file": ".env", "extra": "ignore"}
 
     account: str
     user: str
