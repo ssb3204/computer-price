@@ -12,15 +12,12 @@ GitHub Actions 또는 로컬에서 직접 실행:
 
 import logging
 import sys
-import time
 
 from src.common.config import SnowflakeSettings
 from src.pipeline.analytics import aggregate_analytics
 from src.pipeline.crawl import crawl_all_sites
 from src.pipeline.detect import detect_changes
 from src.pipeline.load_raw import load_raw
-from src.pipeline.observability import PipelineTracker
-from src.pipeline.quality import check_cross_site_prices, check_layer_consistency
 from src.pipeline.slack import send_slack_failures
 from src.pipeline.transform import transform_staging
 
@@ -36,91 +33,59 @@ def main() -> int:
     logger.info("=== 파이프라인 시작 ===")
     settings = SnowflakeSettings()
 
-    tracker = PipelineTracker(settings)
-    tracker.start()
-
     # Step 1: 크롤링
-    t = time.monotonic()
     try:
         all_raw, crawl_failures = crawl_all_sites(settings)
-        tracker.record_step("crawl", "SUCCESS", duration_sec=time.monotonic() - t, record_count=len(all_raw))
+        logger.info("[crawl] SUCCESS — %d건", len(all_raw))
     except Exception as exc:
-        tracker.record_step("crawl", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
-        tracker.finish("FAILED", error_msg=str(exc))
+        logger.error("[crawl] FAILED — %s", exc)
         return 1
 
     # Step 2: Raw 적재
-    t = time.monotonic()
     if all_raw:
         try:
             load_raw(settings, all_raw)
-            tracker.record_step("load_raw", "SUCCESS", duration_sec=time.monotonic() - t, record_count=len(all_raw))
+            logger.info("[load_raw] SUCCESS — %d건", len(all_raw))
         except Exception as exc:
-            tracker.record_step("load_raw", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
-            tracker.finish("FAILED", error_msg=str(exc))
+            logger.error("[load_raw] FAILED — %s", exc)
             return 1
     else:
-        tracker.record_step("load_raw", "SKIPPED", duration_sec=0)
+        logger.info("[load_raw] SKIPPED — 수집 데이터 없음")
 
     # Step 3: Staging 변환
-    t = time.monotonic()
     try:
         count = transform_staging(settings)
-        tracker.record_step("transform", "SUCCESS", duration_sec=time.monotonic() - t, record_count=count)
+        logger.info("[transform] SUCCESS — %d건", count)
     except Exception as exc:
-        tracker.record_step("transform", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
-        tracker.finish("FAILED", error_msg=str(exc))
+        logger.error("[transform] FAILED — %s", exc)
         return 1
 
-    # Step 3.5: 품질 검증 (교차검증 + 레이어 정합성, WARNING만, 파이프라인 계속)
-    t = time.monotonic()
-    try:
-        cross_issues = check_cross_site_prices(settings)
-        layer = check_layer_consistency(settings)
-        total_issues = cross_issues + layer.total_issues
-        q_status = "PARTIAL" if layer.total_issues > 0 else "SUCCESS"
-        tracker.record_step(
-            "quality", q_status,
-            duration_sec=time.monotonic() - t,
-            record_count=total_issues,
-        )
-    except Exception as exc:
-        tracker.record_step("quality", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
-
     # Step 4: 변경 감지
-    t = time.monotonic()
     try:
         alert_count = detect_changes(settings)
-        tracker.record_step("detect", "SUCCESS", duration_sec=time.monotonic() - t, record_count=alert_count)
+        logger.info("[detect] SUCCESS — %d건 알림", alert_count)
     except Exception as exc:
-        tracker.record_step("detect", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
+        logger.error("[detect] FAILED — %s", exc)
 
     # Step 5: Slack (크롤링 실패만)
-    t = time.monotonic()
     try:
         send_slack_failures(crawl_failures)
-        tracker.record_step("slack", "SUCCESS", duration_sec=time.monotonic() - t)
     except Exception as exc:
-        tracker.record_step("slack", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
+        logger.error("[slack] FAILED — %s", exc)
 
     # Step 6: Analytics 집계
-    t = time.monotonic()
     try:
         aggregate_analytics(settings)
-        tracker.record_step("analytics", "SUCCESS", duration_sec=time.monotonic() - t)
+        logger.info("[analytics] SUCCESS")
     except Exception as exc:
-        tracker.record_step("analytics", "FAILED", duration_sec=time.monotonic() - t, error_msg=str(exc))
+        logger.error("[analytics] FAILED — %s", exc)
 
     logger.info("=== 파이프라인 완료 ===")
 
-    # 모든 사이트가 실패하면 FAILED, 일부 실패하면 PARTIAL
     if len(crawl_failures) == 3:
         logger.error("모든 사이트 크롤링 실패 — exit 1")
-        tracker.finish("FAILED", error_msg="all 3 sites failed")
         return 1
 
-    final_status = "PARTIAL" if crawl_failures else "SUCCESS"
-    tracker.finish(final_status)
     return 0
 
 

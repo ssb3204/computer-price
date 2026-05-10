@@ -18,9 +18,6 @@ from src.dashboard.data_access.snowflake_queries import (
     get_alerts,
     get_category_price_summary,
     get_latest_prices_all,
-    get_pipeline_duration_trend,
-    get_pipeline_runs,
-    get_pipeline_step_runs,
     get_price_trend,
     get_product_stats,
     get_summary_stats,
@@ -41,7 +38,6 @@ from src.dashboard.helpers import (
 )
 from src.dashboard.layouts.alerts import alerts_layout
 from src.dashboard.layouts.overview import overview_page
-from src.dashboard.layouts.pipeline import pipeline_page
 from src.dashboard.layouts.prices import prices_page
 from src.dashboard.layouts.trends import trends_page
 from src.dashboard.layouts.watchlist import watchlist_page
@@ -98,8 +94,6 @@ def register_callbacks(app):
             return alerts_layout()
         if pathname == "/watchlist":
             return watchlist_page()
-        if pathname == "/pipeline":
-            return pipeline_page()
         return overview_page()
 
     # ── Overview ──
@@ -418,196 +412,6 @@ def register_callbacks(app):
 
         return output
 
-
-    # ── Pipeline ──
-
-    STEP_ORDER = ["crawl", "load_raw", "transform", "quality", "detect", "slack", "analytics"]
-    STATUS_COLOR = {"SUCCESS": "#51cf66", "PARTIAL": "#fcc419", "FAILED": "#ff6b6b"}
-
-    @app.callback(
-        [Output("pipeline-summary-cards", "children"),
-         Output("pipeline-duration-chart", "figure"),
-         Output("pipeline-step-bar-chart", "figure"),
-         Output("pipeline-runs-table", "data"),
-         Output("pipeline-runs-table", "columns"),
-         Output("pipeline-runs-store", "data")],
-        Input("refresh-interval", "n_intervals"),
-    )
-    def update_pipeline_overview(_):
-        try:
-            with _get_conn() as conn:
-                df_runs  = get_pipeline_runs(conn, limit=30)
-                df_trend = get_pipeline_duration_trend(conn, limit=20)
-        except Exception:
-            logger.exception("파이프라인 데이터 로드 실패")
-            return [], empty_chart("DB 오류"), empty_chart("DB 오류"), [], [], []
-
-        # ── 요약 카드 ──
-        total   = len(df_runs)
-        success = (df_runs["status"] == "SUCCESS").sum()
-        rate    = round(success / total * 100, 1) if total else 0
-        avg_dur = round(df_runs["duration_sec"].mean(), 1) if total else 0
-        last    = df_runs.iloc[0] if total else None
-        last_status = last["status"] if last is not None else "-"
-        last_time   = str(last["started_at"])[:16].replace("T", " ") if last is not None else "-"
-
-        cards = [
-            dbc.Col(dbc.Card(dbc.CardBody([
-                html.H6("총 실행 횟수", className="card-subtitle text-muted"),
-                html.H3(f"{total}회"),
-            ]), color="dark"), width=3),
-            dbc.Col(dbc.Card(dbc.CardBody([
-                html.H6("성공률", className="card-subtitle text-muted"),
-                html.H3(f"{rate}%", className="text-success" if rate >= 90 else "text-warning"),
-            ]), color="dark"), width=3),
-            dbc.Col(dbc.Card(dbc.CardBody([
-                html.H6("평균 소요시간", className="card-subtitle text-muted"),
-                html.H3(f"{avg_dur}초"),
-            ]), color="dark"), width=3),
-            dbc.Col(dbc.Card(dbc.CardBody([
-                html.H6("마지막 실행", className="card-subtitle text-muted"),
-                html.H4(last_status,
-                        className=f"text-{'success' if last_status=='SUCCESS' else 'warning' if last_status=='PARTIAL' else 'danger'}"),
-                html.Small(last_time, className="text-muted"),
-            ]), color="dark"), width=3),
-        ]
-
-        # ── 실행시간 추이 라인 차트 ──
-        df_line = df_runs[["started_at", "duration_sec", "status"]].copy()
-        df_line["label"] = df_line["started_at"].astype(str).str[:16]
-        fig_line = px.line(
-            df_line.iloc[::-1], x="label", y="duration_sec",
-            markers=True,
-            labels={"label": "", "duration_sec": "소요시간 (초)"},
-            color_discrete_sequence=["#58a6ff"],
-        )
-        fig_line.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(t=20, b=60, l=50, r=10),
-            xaxis_tickangle=-45,
-        )
-        fig_line.update_traces(
-            hovertemplate="<b>%{x}</b><br>%{y:.1f}초<extra></extra>",
-        )
-
-        # ── 스텝별 소요시간 누적 막대 차트 ──
-        if df_trend.empty or "step_name" not in df_trend.columns:
-            fig_bar = empty_chart("데이터 없음")
-        else:
-            df_bar = df_trend.dropna(subset=["step_name"]).copy()
-            df_bar["label"] = df_bar["started_at"].astype(str).str[:16]
-            # 스텝 순서 적용
-            df_bar["step_name"] = pd.Categorical(df_bar["step_name"], categories=STEP_ORDER, ordered=True)
-            df_bar = df_bar.sort_values(["started_at", "step_name"])
-            fig_bar = px.bar(
-                df_bar, x="label", y="step_dur", color="step_name",
-                labels={"label": "", "step_dur": "소요시간 (초)", "step_name": "스텝"},
-                category_orders={"step_name": STEP_ORDER},
-            )
-            fig_bar.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                barmode="stack",
-                legend={"orientation": "h", "y": -0.35},
-                margin=dict(t=20, b=80, l=50, r=10),
-                xaxis_tickangle=-45,
-            )
-            fig_bar.update_traces(hovertemplate="<b>%{x}</b><br>%{y:.2f}초<extra>%{fullData.name}</extra>")
-
-        # ── 실행 이력 테이블 ──
-        runs_data = []
-        for _, r in df_runs.iterrows():
-            runs_data.append({
-                "run_id":       r["run_id"],
-                "started_at":   str(r["started_at"])[:16].replace("T", " "),
-                "duration_sec": f"{r['duration_sec']:.1f}초",
-                "status":       r["status"],
-                "error_msg":    r["error_msg"] if r["error_msg"] else "",
-            })
-        runs_cols = [
-            {"name": "실행 ID",    "id": "run_id"},
-            {"name": "시작 시간",  "id": "started_at"},
-            {"name": "소요시간",   "id": "duration_sec"},
-            {"name": "상태",       "id": "status"},
-            {"name": "에러",       "id": "error_msg"},
-        ]
-
-        return cards, fig_line, fig_bar, runs_data, runs_cols, df_runs.to_dict("records")
-
-    @app.callback(
-        [Output("pipeline-step-title", "children"),
-         Output("pipeline-funnel-chart", "figure"),
-         Output("pipeline-step-table", "data"),
-         Output("pipeline-step-table", "columns")],
-        [Input("pipeline-runs-table", "selected_rows")],
-        [State("pipeline-runs-store", "data")],
-        prevent_initial_call=True,
-    )
-    def update_pipeline_step_detail(selected_rows, runs_data):
-        if not selected_rows or not runs_data:
-            raise dash.exceptions.PreventUpdate
-
-        row   = runs_data[selected_rows[0]]
-        run_id = row["run_id"]
-        started = str(row["started_at"])[:16].replace("T", " ")
-
-        try:
-            with _get_conn() as conn:
-                df = get_pipeline_step_runs(conn, run_id)
-        except Exception:
-            logger.exception("스텝 상세 로드 실패")
-            raise dash.exceptions.PreventUpdate
-
-        title = f"스텝 상세 — {run_id} ({started})"
-
-        # ── 레코드 수 funnel (crawl→analytics 데이터 흐름) ──
-        df_funnel = df[df["record_count"].notna()].copy()
-        df_funnel["step_name"] = pd.Categorical(
-            df_funnel["step_name"], categories=STEP_ORDER, ordered=True
-        )
-        df_funnel = df_funnel.sort_values("step_name")
-
-        if df_funnel.empty:
-            fig_funnel = empty_chart("레코드 수 데이터 없음")
-        else:
-            fig_funnel = px.funnel(
-                df_funnel,
-                x="record_count",
-                y="step_name",
-                labels={"record_count": "레코드 수", "step_name": "스텝"},
-                title="데이터 흐름 (레코드 수)",
-                color="step_name",
-            )
-            fig_funnel.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
-                margin=dict(t=40, b=20, l=20, r=20),
-            )
-
-        # ── 스텝 상세 테이블 ──
-        step_data = []
-        for _, s in df.iterrows():
-            step_data.append({
-                "step_name":    s["step_name"],
-                "duration_sec": f"{s['duration_sec']:.2f}초",
-                "record_count": int(s["record_count"]) if pd.notna(s["record_count"]) else "-",
-                "status":       s["status"],
-                "error_msg":    s["error_msg"] if s["error_msg"] else "",
-            })
-        step_cols = [
-            {"name": "스텝",       "id": "step_name"},
-            {"name": "소요시간",   "id": "duration_sec"},
-            {"name": "레코드 수",  "id": "record_count"},
-            {"name": "상태",       "id": "status"},
-            {"name": "에러",       "id": "error_msg"},
-        ]
-
-        return title, fig_funnel, step_data, step_cols
 
     # ── Button Toggles ──
 

@@ -151,13 +151,12 @@ class TestZeroCountCheck:
 # ── 레이어 정합성 체크 ─────────────────────────────────────────────────────────
 
 
-def _make_mock_conn(raw_count, staging_count, missing_analytics, missing_latest):
+def _make_mock_conn(raw_count, staging_count, missing_analytics):
     """check_layer_consistency용 Mock Snowflake 커넥션 생성."""
     cur = MagicMock()
     cur.fetchone.side_effect = [
         (raw_count, staging_count),   # Raw vs Staging 건수
         (missing_analytics,),          # Analytics 누락
-        (missing_latest,),             # LATEST_PRICES 누락
     ]
     conn = MagicMock()
     conn.__enter__ = MagicMock(return_value=conn)
@@ -170,23 +169,23 @@ class TestLayerConsistencyResult:
     def test_total_issues_all_ok(self):
         r = LayerConsistencyResult(
             raw_count=32, staging_count=31, drop_count=1,
-            drop_rate=3.1, missing_analytics=0, missing_latest=0,
+            drop_rate=3.1, missing_analytics=0,
         )
         assert r.total_issues == 0
 
     def test_total_issues_high_drop_rate(self):
         r = LayerConsistencyResult(
             raw_count=32, staging_count=20, drop_count=12,
-            drop_rate=37.5, missing_analytics=0, missing_latest=0,
+            drop_rate=37.5, missing_analytics=0,
         )
         assert r.total_issues == 1  # 손실률 초과 1건
 
     def test_total_issues_missing_counts(self):
         r = LayerConsistencyResult(
             raw_count=32, staging_count=32, drop_count=0,
-            drop_rate=0.0, missing_analytics=3, missing_latest=2,
+            drop_rate=0.0, missing_analytics=3,
         )
-        assert r.total_issues == 5  # 누락 5건
+        assert r.total_issues == 3  # Analytics 누락 3건
 
 
 class TestCheckLayerConsistency:
@@ -196,7 +195,7 @@ class TestCheckLayerConsistency:
 
     def test_normal_case_no_issues(self):
         """정상 케이스: 손실 낮고 누락 없음."""
-        mock_conn = _make_mock_conn(32, 31, 0, 0)
+        mock_conn = _make_mock_conn(32, 31, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
              patch("src.pipeline.quality._send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
@@ -206,13 +205,12 @@ class TestCheckLayerConsistency:
         assert result.drop_count == 1
         assert abs(result.drop_rate - 3.125) < 0.01
         assert result.missing_analytics == 0
-        assert result.missing_latest == 0
         assert result.total_issues == 0
         mock_slack.assert_not_called()
 
     def test_high_drop_rate_triggers_slack(self):
         """손실률 10% 초과 시 Slack 알림."""
-        mock_conn = _make_mock_conn(32, 10, 0, 0)
+        mock_conn = _make_mock_conn(32, 10, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
              patch("src.pipeline.quality._send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
@@ -224,7 +222,7 @@ class TestCheckLayerConsistency:
 
     def test_missing_analytics_triggers_slack(self):
         """Analytics 누락 상품 있으면 Slack 알림."""
-        mock_conn = _make_mock_conn(30, 30, 5, 0)
+        mock_conn = _make_mock_conn(30, 30, 5)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
              patch("src.pipeline.quality._send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
@@ -234,20 +232,9 @@ class TestCheckLayerConsistency:
         mock_slack.assert_called_once()
         assert "Analytics" in mock_slack.call_args[0][0]
 
-    def test_missing_latest_prices_triggers_slack(self):
-        """LATEST_PRICES 누락 상품 있으면 Slack 알림."""
-        mock_conn = _make_mock_conn(30, 30, 0, 3)
-        with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
-             patch("src.pipeline.quality._send_slack_message") as mock_slack:
-            result = check_layer_consistency(self._make_settings())
-
-        assert result.missing_latest == 3
-        assert result.total_issues == 3
-        mock_slack.assert_called_once()
-
     def test_zero_raw_count_no_division_error(self):
         """Raw 건수가 0이면 drop_rate=0.0으로 처리 (ZeroDivisionError 방지)."""
-        mock_conn = _make_mock_conn(0, 0, 0, 0)
+        mock_conn = _make_mock_conn(0, 0, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
              patch("src.pipeline.quality._send_slack_message"):
             result = check_layer_consistency(self._make_settings())

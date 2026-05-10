@@ -1,4 +1,4 @@
-"""Step 3: Staging 변환 — Raw 데이터를 정제해 STAGING 레이어에 적재."""
+"""Step 3: Staging 변환 — Raw 데이터를 정제해 STAGING.PRODUCTS / PRICE_HISTORY에 적재."""
 
 import logging
 import re
@@ -18,7 +18,7 @@ _SITE_DISPLAY_MAP = {
 
 
 def transform_staging(settings: SnowflakeSettings) -> int:
-    """RAW.CRAWLED_PRICES_STREAM을 소비해 STAGING.PRODUCTS / PRICE_HISTORY / LATEST_PRICES에 변환 적재.
+    """RAW.CRAWLED_PRICES_STREAM을 소비해 STAGING.PRODUCTS / PRICE_HISTORY에 변환 적재.
 
     Stream 소비 방식:
         CREATE TEMPORARY TABLE AS SELECT FROM stream (DML) → Stream offset 이동
@@ -126,16 +126,6 @@ def transform_staging(settings: SnowflakeSettings) -> int:
                 "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, RAW_ID, PRICE, CRAWLED_AT) "
                 "VALUES (s.PRODUCT_ID, s.RAW_ID, s.PRICE, s.CRAWLED_AT)",
                 daily_rows,
-            )
-            cur.executemany(
-                "MERGE INTO LATEST_PRICES t "
-                "USING (SELECT %s AS PRODUCT_ID, %s AS PRICE, %s AS CRAWLED_AT) s "
-                "ON t.PRODUCT_ID = s.PRODUCT_ID "
-                "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, PRICE, CRAWLED_AT) "
-                "VALUES (s.PRODUCT_ID, s.PRICE, s.CRAWLED_AT) "
-                "WHEN MATCHED AND t.CRAWLED_AT <= s.CRAWLED_AT THEN UPDATE SET "
-                "PRICE = s.PRICE, CRAWLED_AT = s.CRAWLED_AT, UPDATED_AT = CURRENT_TIMESTAMP()",
-                [(pid, price, cat) for pid, _, price, cat in daily_rows],
             )
 
         cur.close()

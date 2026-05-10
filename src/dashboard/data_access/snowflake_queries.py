@@ -41,7 +41,7 @@ def get_summary_stats(conn: SnowflakeConnection) -> dict:
                 (SELECT COUNT(DISTINCT CATEGORY) FROM STAGING.PRODUCTS)        AS total_categories,
                 (SELECT COUNT(DISTINCT SITE)     FROM STAGING.PRODUCTS)        AS total_sites,
                 (SELECT COUNT(*)               FROM STAGING.PRICE_HISTORY
-                 WHERE CRAWLED_AT::DATE = CURRENT_DATE())                       AS today_records
+                 WHERE CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE) AS today_records
         """)
         row = cur.fetchone()
         return {
@@ -140,7 +140,7 @@ def get_today_crawl_comparison(
     search: str | None = None,
 ) -> pd.DataFrame:
     """오늘 크롤링 4회(1~4차) 가격 비교."""
-    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()"]
+    conditions = ["dp.CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE"]
     params: list = []
 
     if category and category != "ALL":
@@ -297,90 +297,6 @@ def remove_watch_product(conn: SnowflakeConnection, watch_id: int) -> None:
             "UPDATE STAGING.WATCHLIST SET IS_ACTIVE = FALSE WHERE ID = %s",
             (watch_id,)
         )
-    finally:
-        cur.close()
-
-
-def get_pipeline_runs(conn: SnowflakeConnection, limit: int = 30) -> pd.DataFrame:
-    """파이프라인 실행 이력 (최근 N회)."""
-    sql = f"""
-        SELECT
-            RUN_ID,
-            STARTED_AT,
-            FINISHED_AT,
-            DURATION_SEC,
-            STATUS,
-            ERROR_MSG
-        FROM RAW.PIPELINE_RUNS
-        ORDER BY STARTED_AT DESC
-        LIMIT {limit}
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute("USE DATABASE COMPUTER_PRICE")
-        cur.execute(sql)
-        cols = [desc[0].lower() for desc in cur.description]
-        return pd.DataFrame(cur.fetchall(), columns=cols)
-    finally:
-        cur.close()
-
-
-def get_pipeline_step_runs(conn: SnowflakeConnection, run_id: str) -> pd.DataFrame:
-    """특정 실행의 스텝별 상세."""
-    sql = """
-        SELECT
-            STEP_NAME,
-            STARTED_AT,
-            FINISHED_AT,
-            DURATION_SEC,
-            RECORD_COUNT,
-            STATUS,
-            ERROR_MSG
-        FROM RAW.PIPELINE_STEP_RUNS
-        WHERE RUN_ID = %s
-        ORDER BY STARTED_AT ASC
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute("USE DATABASE COMPUTER_PRICE")
-        cur.execute(sql, (run_id,))
-        cols = [desc[0].lower() for desc in cur.description]
-        return pd.DataFrame(cur.fetchall(), columns=cols)
-    finally:
-        cur.close()
-
-
-def get_pipeline_duration_trend(conn: SnowflakeConnection, limit: int = 20) -> pd.DataFrame:
-    """실행시간 추이 + 스텝별 소요시간 (차트용)."""
-    sql = f"""
-        WITH runs AS (
-            SELECT RUN_ID, STARTED_AT, DURATION_SEC, STATUS
-            FROM RAW.PIPELINE_RUNS
-            ORDER BY STARTED_AT DESC
-            LIMIT {limit}
-        ),
-        steps AS (
-            SELECT s.RUN_ID, s.STEP_NAME, s.DURATION_SEC AS step_dur
-            FROM RAW.PIPELINE_STEP_RUNS s
-            JOIN runs r ON r.RUN_ID = s.RUN_ID
-        )
-        SELECT
-            r.RUN_ID,
-            r.STARTED_AT,
-            r.DURATION_SEC       AS total_dur,
-            r.STATUS,
-            s.STEP_NAME,
-            s.step_dur
-        FROM runs r
-        LEFT JOIN steps s ON s.RUN_ID = r.RUN_ID
-        ORDER BY r.STARTED_AT ASC, s.STEP_NAME
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute("USE DATABASE COMPUTER_PRICE")
-        cur.execute(sql)
-        cols = [desc[0].lower() for desc in cur.description]
-        return pd.DataFrame(cur.fetchall(), columns=cols)
     finally:
         cur.close()
 

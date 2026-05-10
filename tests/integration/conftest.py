@@ -47,10 +47,6 @@ def _cleanup(settings: SnowflakeSettings) -> None:
                 test_pids,
             )
             cur.execute(
-                f"DELETE FROM STAGING.LATEST_PRICES WHERE PRODUCT_ID IN ({placeholders})",
-                test_pids,
-            )
-            cur.execute(
                 "DELETE FROM STAGING.PRODUCTS WHERE PRODUCT_NAME LIKE %s",
                 (TEST_PREFIX + "%",),
             )

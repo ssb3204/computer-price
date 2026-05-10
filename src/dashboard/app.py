@@ -32,7 +32,7 @@ app.layout = dbc.Container([
                 dbc.NavLink("가격 추이", href="/trends", active="exact"),
                 dbc.NavLink("가격 알림", href="/alerts", active="exact"),
                 dbc.NavLink("크롤링 대상", href="/watchlist", active="exact"),
-                dbc.NavLink("파이프라인", href="/pipeline", active="exact"),
+                dbc.NavLink("파이프라인 ↗", href="https://github.com/ssb3204/computer_price/actions", target="_blank"),
             ], vertical=True, pills=True),
         ], width=2, className="bg-dark vh-100 pt-3 position-fixed",
            style={"overflowY": "auto"}),

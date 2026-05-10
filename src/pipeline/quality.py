@@ -86,7 +86,6 @@ class LayerConsistencyResult:
     drop_count: int          # Raw → Staging 손실 건수
     drop_rate: float         # 손실률 (%)
     missing_analytics: int   # ANALYTICS.PRODUCT_STATS 미집계 상품 수
-    missing_latest: int      # STAGING.LATEST_PRICES 누락 상품 수
 
     @property
     def total_issues(self) -> int:
@@ -95,19 +94,17 @@ class LayerConsistencyResult:
         if self.drop_rate > 10.0:
             issues += 1
         issues += self.missing_analytics
-        issues += self.missing_latest
         return issues
 
 
 def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResult:
-    """레이어 정합성 체크: Raw→Staging 손실률, Analytics/LATEST_PRICES 누락 상품.
+    """레이어 정합성 체크: Raw→Staging 손실률, Analytics 누락 상품.
 
     임계값 초과 시 Slack WARNING을 보내지만 파이프라인은 계속 진행한다.
 
     체크 항목:
         1. Raw → Staging 손실률 > 10%: 파싱/이상치 제외로 과도한 드롭 발생
         2. ANALYTICS.PRODUCT_STATS 누락: analytics 스텝 미실행 또는 버그
-        3. STAGING.LATEST_PRICES 누락: transform 스텝 불완전 적재
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
@@ -134,17 +131,6 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
             )
         """)
         missing_analytics = int(cur.fetchone()[0])
-
-        # 3. LATEST_PRICES 누락 상품 (PRODUCTS에 있지만 LATEST_PRICES에 없음)
-        cur.execute("""
-            SELECT COUNT(*)
-            FROM STAGING.PRODUCTS p
-            WHERE NOT EXISTS (
-                SELECT 1 FROM STAGING.LATEST_PRICES lp
-                WHERE lp.PRODUCT_ID = p.PRODUCT_ID
-            )
-        """)
-        missing_latest = int(cur.fetchone()[0])
         cur.close()
 
     drop_count = raw_count - staging_count
@@ -156,7 +142,6 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
         drop_count=drop_count,
         drop_rate=drop_rate,
         missing_analytics=missing_analytics,
-        missing_latest=missing_latest,
     )
 
     # 이슈 로깅 및 Slack 알림
@@ -165,8 +150,6 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
         issues.append(f"Raw→Staging 손실률 {drop_rate:.1f}% ({drop_count}건 누락, Raw={raw_count}건)")
     if missing_analytics > 0:
         issues.append(f"Analytics 미집계 상품 {missing_analytics}개")
-    if missing_latest > 0:
-        issues.append(f"LATEST_PRICES 누락 상품 {missing_latest}개")
 
     if issues:
         lines = [f"*⚠️ [레이어 정합성] 이슈 {len(issues)}건*"] + [f"• {i}" for i in issues]
@@ -174,9 +157,8 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
         logger.warning("[레이어 정합성] %s", " | ".join(issues))
     else:
         logger.info(
-            "[레이어 정합성] 정상 — Raw=%d → Staging=%d (손실률 %.1f%%), "
-            "Analytics 누락=%d, LATEST 누락=%d",
-            raw_count, staging_count, drop_rate, missing_analytics, missing_latest,
+            "[레이어 정합성] 정상 — Raw=%d → Staging=%d (손실률 %.1f%%), Analytics 누락=%d",
+            raw_count, staging_count, drop_rate, missing_analytics,
         )
 
     return result
