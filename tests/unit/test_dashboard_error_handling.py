@@ -55,12 +55,16 @@ def _get_inner_callback(app, target_output_id: str):
 @pytest.fixture(scope="module")
 def dash_app():
     """Snowflake 더미 env로 콜백 등록한 Dash 앱 (모듈 공유)."""
+    from flask_caching import Cache
+
     with patch.dict(os.environ, _DUMMY_SF_ENV):
         from src.dashboard.callbacks import register_callbacks
 
         app = dash.Dash(__name__, suppress_callback_exceptions=True)
         app.layout = dash.html.Div(id="dummy")
-        register_callbacks(app)
+        # NullCache: 테스트에서는 캐시를 비활성화해 매 호출마다 실제 함수 실행
+        cache = Cache(app.server, config={"CACHE_TYPE": "NullCache"})
+        register_callbacks(app, cache)
         yield app
 
 

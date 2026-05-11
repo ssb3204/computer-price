@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 
 import dash
 import pandas as pd
@@ -45,12 +46,15 @@ from src.dashboard.layouts.watchlist import watchlist_page
 logger = logging.getLogger(__name__)
 
 _sf_settings = None
+_sf_lock = threading.Lock()
 
 
 def _get_conn():
     global _sf_settings
     if _sf_settings is None:
-        _sf_settings = SnowflakeSettings()
+        with _sf_lock:
+            if _sf_settings is None:
+                _sf_settings = SnowflakeSettings()
     return get_connection(_sf_settings)
 
 
@@ -79,8 +83,44 @@ def _register_button_toggle(app, store_id, btn_prefix, items, default=None):
     return _toggle
 
 
-def register_callbacks(app):
+def register_callbacks(app, cache):
     """app 에 모든 콜백을 등록한다."""
+
+    # ── 캐시 래퍼 (TTL 1800초=30분, watchlist CRUD 제외) ──
+    @cache.memoize(timeout=1800)
+    def _fetch_summary_stats():
+        with _get_conn() as conn:
+            return get_summary_stats(conn)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_category_price_summary():
+        with _get_conn() as conn:
+            return get_category_price_summary(conn)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_latest_prices_all():
+        with _get_conn() as conn:
+            return get_latest_prices_all(conn)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_product_stats():
+        with _get_conn() as conn:
+            return get_product_stats(conn)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_alerts(alert_type=None, category=None):
+        with _get_conn() as conn:
+            return get_alerts(conn, alert_type=alert_type, category=category)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_today_crawl_comparison(category=None):
+        with _get_conn() as conn:
+            return get_today_crawl_comparison(conn, category=category)
+
+    @cache.memoize(timeout=1800)
+    def _fetch_price_trend(category=None, search=None, days=None):
+        with _get_conn() as conn:
+            return get_price_trend(conn, category=category, search=search, days=days)
 
     # ── Page routing ──
 
@@ -106,10 +146,9 @@ def register_callbacks(app):
     )
     def update_overview(_):
         try:
-            with _get_conn() as conn:
-                stats = get_summary_stats(conn)
-                cat_df = get_category_price_summary(conn)
-                prices_df = get_latest_prices_all(conn)
+            stats = _fetch_summary_stats()
+            cat_df = _fetch_category_price_summary()
+            prices_df = _fetch_latest_prices_all()
         except Exception as e:
             logger.exception("Overview 데이터 로드 실패")
             err = db_error_ui()
@@ -156,8 +195,7 @@ def register_callbacks(app):
     )
     def update_prices_table(category, site):
         try:
-            with _get_conn() as conn:
-                df = get_latest_prices_all(conn)
+            df = _fetch_latest_prices_all()
         except Exception as e:
             logger.exception("가격표 데이터 로드 실패")
             return db_error_ui()
@@ -177,8 +215,7 @@ def register_callbacks(app):
     )
     def update_stats(_):
         try:
-            with _get_conn() as conn:
-                df = get_product_stats(conn)
+            df = _fetch_product_stats()
         except Exception as e:
             logger.exception("상품 통계 데이터 로드 실패")
             return db_error_ui()
@@ -198,8 +235,7 @@ def register_callbacks(app):
             return empty_chart("검색어를 입력하면 사이트별 가격 추이를 볼 수 있습니다"), []
 
         try:
-            with _get_conn() as conn:
-                df = get_price_trend(conn, category=category, search=search, days=days if days else None)
+            df = _fetch_price_trend(category=category, search=search, days=days if days else None)
         except Exception as e:
             logger.exception("가격 추이 데이터 로드 실패")
             return empty_chart("데이터베이스 연결 실패"), []
@@ -278,8 +314,7 @@ def register_callbacks(app):
             return "up" if float(val) > float(prev_val) else ("down" if float(val) < float(prev_val) else "")
 
         try:
-            with _get_conn() as conn:
-                df = get_today_crawl_comparison(conn, category=category, search=None)
+            df = _fetch_today_crawl_comparison(category=category)
         except Exception as e:
             logger.exception("오늘 크롤링 비교 데이터 로드 실패")
             return [], []
@@ -342,8 +377,7 @@ def register_callbacks(app):
     )
     def update_alerts_table(alert_type, category, _):
         try:
-            with _get_conn() as conn:
-                df = get_alerts(conn, alert_type=alert_type, category=category)
+            df = _fetch_alerts(alert_type=alert_type, category=category)
         except Exception as e:
             logger.exception("알림 데이터 로드 실패")
             return db_error_ui()
@@ -538,7 +572,7 @@ def register_callbacks(app):
                     df_after = get_watch_products(conn)
                     send_slack_watch_change("추가", product, df_after)
         except Exception:
-            pass
+            logger.exception("watchlist 추가 실패")
 
         return (current_trigger or 0) + 1
 
@@ -594,6 +628,19 @@ def register_callbacks(app):
                         "category": r["category"],
                     }, df_after)
         except Exception:
-            pass
+            logger.exception("watchlist 삭제 실패")
 
         return False, (current_trigger or 0) + 1
+
+    # 캐시 워밍에서 호출할 수 있도록 fetcher 함수들을 반환.
+    # 워밍은 각 함수를 인자 없이(기본값으로) 호출하므로, 파라미터 없는 전체 데이터 쿼리만 포함한다.
+    # _fetch_alerts / _fetch_today_crawl_comparison 은 category=None 기본값으로 전체 데이터를 워밍.
+    # _fetch_price_trend 는 search 키워드 없이는 의미 있는 결과가 없으므로 워밍 대상에서 제외.
+    return {
+        "summary_stats":          _fetch_summary_stats,
+        "category_price_summary": _fetch_category_price_summary,
+        "latest_prices_all":      _fetch_latest_prices_all,
+        "product_stats":          _fetch_product_stats,
+        "alerts":                 _fetch_alerts,
+        "today_crawl_comparison": _fetch_today_crawl_comparison,
+    }

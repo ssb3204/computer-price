@@ -1,7 +1,14 @@
 """Dash web application — Snowflake 연동 대시보드."""
 
+import logging
 import os
+import threading
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+)
 
 from dotenv import load_dotenv
 
@@ -10,8 +17,11 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html
+from flask_caching import Cache
 
 from src.dashboard.callbacks import register_callbacks
+
+logger = logging.getLogger(__name__)
 
 app = dash.Dash(
     __name__,
@@ -19,6 +29,12 @@ app = dash.Dash(
     suppress_callback_exceptions=True,
     title="컴퓨터 가격 모니터",
 )
+
+# SimpleCache: 메모리 기반, 외부 서버 불필요. TTL=1800초(30분)
+cache = Cache(app.server, config={
+    "CACHE_TYPE": "SimpleCache",
+    "CACHE_DEFAULT_TIMEOUT": 1800,
+})
 
 # ── Layout ──
 
@@ -48,7 +64,27 @@ app.layout = dbc.Container([
 
 # ── Callbacks ──
 
-register_callbacks(app)
+fetchers = register_callbacks(app, cache)
+
+
+def _warm_cache(fetchers: dict) -> None:
+    """앱 시작 시 백그라운드에서 모든 캐시를 미리 채운다."""
+    logger.info("[Cache Warming] 시작")
+    for name, fn in fetchers.items():
+        try:
+            fn()
+            logger.info("[Cache Warming] %s 완료", name)
+        except Exception as exc:
+            logger.warning("[Cache Warming] %s 실패: %s", name, exc)
+    logger.info("[Cache Warming] 전체 완료")
+
+
+threading.Thread(
+    target=_warm_cache,
+    args=(fetchers,),
+    daemon=True,
+    name="cache-warmer",
+).start()
 
 server = app.server
 
