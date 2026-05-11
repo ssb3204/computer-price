@@ -1,0 +1,153 @@
+{
+  "대시보드 (/)": [
+    {
+      "run": 1,
+      "conn_ms": 938.3,
+      "query_ms": 826.5,
+      "total_ms": 1764.8,
+      "query_breakdown": {
+        "get_summary_stats": 245.2,
+        "get_category_price_summary": 426.6,
+        "get_latest_prices_all": 154.7
+      }
+    },
+    {
+      "run": 2,
+      "conn_ms": 361.1,
+      "query_ms": 461.9,
+      "total_ms": 823.0,
+      "query_breakdown": {
+        "get_summary_stats": 195.5,
+        "get_category_price_summary": 125.2,
+        "get_latest_prices_all": 141.2
+      }
+    },
+    {
+      "run": 3,
+      "conn_ms": 142.4,
+      "query_ms": 432.6,
+      "total_ms": 575.0,
+      "query_breakdown": {
+        "get_summary_stats": 183.3,
+        "get_category_price_summary": 142.0,
+        "get_latest_prices_all": 107.3
+      }
+    }
+  ],
+  "가격 정보 (/prices)": [
+    {
+      "run": 1,
+      "conn_ms": 363.0,
+      "query_ms": 144.7,
+      "total_ms": 507.7,
+      "query_breakdown": {
+        "get_latest_prices_all": 144.7
+      }
+    },
+    {
+      "run": 2,
+      "conn_ms": 148.7,
+      "query_ms": 129.4,
+      "total_ms": 278.1,
+      "query_breakdown": {
+        "get_latest_prices_all": 129.4
+      }
+    },
+    {
+      "run": 3,
+      "conn_ms": 121.4,
+      "query_ms": 134.2,
+      "total_ms": 255.6,
+      "query_breakdown": {
+        "get_latest_prices_all": 134.2
+      }
+    }
+  ],
+  "가격 추이 (/trends)": [
+    {
+      "run": 1,
+      "conn_ms": 173.2,
+      "query_ms": 236.4,
+      "total_ms": 409.6,
+      "query_breakdown": {
+        "get_today_crawl_comparison": 236.4
+      }
+    },
+    {
+      "run": 2,
+      "conn_ms": 135.9,
+      "query_ms": 231.9,
+      "total_ms": 367.8,
+      "query_breakdown": {
+        "get_today_crawl_comparison": 231.9
+      }
+    },
+    {
+      "run": 3,
+      "conn_ms": 189.2,
+      "query_ms": 233.8,
+      "total_ms": 423.0,
+      "query_breakdown": {
+        "get_today_crawl_comparison": 233.8
+      }
+    }
+  ],
+  "가격 알림 (/alerts)": [
+    {
+      "run": 1,
+      "conn_ms": 158.0,
+      "query_ms": 159.6,
+      "total_ms": 317.6,
+      "query_breakdown": {
+        "get_alerts": 159.6
+      }
+    },
+    {
+      "run": 2,
+      "conn_ms": 170.9,
+      "query_ms": 132.6,
+      "total_ms": 303.5,
+      "query_breakdown": {
+        "get_alerts": 132.5
+      }
+    },
+    {
+      "run": 3,
+      "conn_ms": 131.1,
+      "query_ms": 180.6,
+      "total_ms": 311.7,
+      "query_breakdown": {
+        "get_alerts": 180.6
+      }
+    }
+  ],
+  "크롤링 대상 (/watchlist)": [
+    {
+      "run": 1,
+      "conn_ms": 134.5,
+      "query_ms": 135.6,
+      "total_ms": 270.1,
+      "query_breakdown": {
+        "get_watch_products": 135.6
+      }
+    },
+    {
+      "run": 2,
+      "conn_ms": 179.9,
+      "query_ms": 130.6,
+      "total_ms": 310.5,
+      "query_breakdown": {
+        "get_watch_products": 130.6
+      }
+    },
+    {
+      "run": 3,
+      "conn_ms": 172.9,
+      "query_ms": 139.0,
+      "total_ms": 311.9,
+      "query_breakdown": {
+        "get_watch_products": 139.0
+      }
+    }
+  ]
+}

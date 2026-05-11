@@ -1,0 +1,22 @@
+{
+  "대시보드 (/)": {
+    "cache_miss_ms": 861.3,
+    "cache_hit_ms": 0.0
+  },
+  "가격 정보 (/prices)": {
+    "cache_miss_ms": 403.2,
+    "cache_hit_ms": 0.001
+  },
+  "가격 추이 (/trends)": {
+    "cache_miss_ms": 419.7,
+    "cache_hit_ms": 0.001
+  },
+  "가격 알림 (/alerts)": {
+    "cache_miss_ms": 269.0,
+    "cache_hit_ms": 0.001
+  },
+  "크롤링 대상 (/watchlist)": {
+    "cache_miss_ms": 274.4,
+    "cache_hit_ms": 0.001
+  }
+}
