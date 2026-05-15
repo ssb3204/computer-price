@@ -18,6 +18,7 @@ from src.pipeline.analytics import aggregate_analytics
 from src.pipeline.crawl import crawl_all_sites
 from src.pipeline.detect import detect_changes
 from src.pipeline.load_raw import load_raw
+from src.pipeline.quality import check_cross_site_prices, check_layer_consistency
 from src.pipeline.slack import send_slack_failures
 from src.pipeline.transform import transform_staging
 
@@ -59,6 +60,15 @@ def main() -> int:
     except Exception as exc:
         logger.error("[transform] FAILED — %s", exc)
         return 1
+
+    # Step 3.5: 레이어 정합성 검증
+    try:
+        result = check_layer_consistency(settings)
+        logger.info("[quality] Raw=%d Staging=%d 손실률=%.1f%%",
+                    result.raw_count, result.staging_count, result.drop_rate)
+        check_cross_site_prices(settings)
+    except Exception as exc:
+        logger.error("[quality] FAILED — %s", exc)
 
     # Step 4: 변경 감지
     try:
