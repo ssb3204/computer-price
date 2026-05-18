@@ -11,6 +11,7 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
            ├── Step 1: 크롤링 (다나와, 컴퓨존, 견적왕)
            ├── Step 2: Snowflake Raw 적재
            ├── Step 3: Staging 변환 (정규화, 가격 파싱, 이상치 제거)
+           ├── Step 3.5: 품질 검증 (레이어 정합성, 사이트 간 가격 편차)
            ├── Step 4: 변경 감지 & 알림 (NEW_LOW, PRICE_DROP 등)
            ├── Step 5: Slack 실패 알림
            └── Step 6: Analytics 집계 (일별/주별 요약)
@@ -76,45 +77,46 @@ computer_price/
 ├── src/
 │   ├── common/          # 공유 모듈 (models, config, snowflake_client)
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
+│   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
 │   └── dashboard/       # Dash 웹 대시보드
-│       ├── layouts/     # 페이지별 레이아웃 (5개 페이지)
+│       ├── layouts/     # 페이지별 레이아웃 (6개 페이지)
 │       └── data_access/ # Snowflake 쿼리
 ├── snowflake/           # Snowflake DDL (3-Layer)
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
 │   └── integration/     # Snowflake 통합 테스트
 ├── .github/workflows/   # CI (유닛+통합 테스트), 크롤링 스케줄
-├── run_pipeline.py      # 파이프라인 진입점 (6단계)
+├── run_pipeline.py      # 파이프라인 진입점 (6단계 + 품질 검증)
 └── docker-compose.yml
 ```
 
 ## 데이터 모델 (Snowflake 3-Layer)
 
 ### Raw — 크롤링 원본
-- **RAW_CRAWLED_PRICES** — 가공 없는 원본 데이터 (가격 텍스트 보존)
+- **CRAWLED_PRICES** — 가공 없는 원본 데이터 (가격 텍스트 보존)
 
 ### Staging — 정제/정규화
-- **DIM_SITES** — 사이트 차원
-- **DIM_CATEGORIES** — 카테고리 차원 (CPU, GPU, RAM, SSD)
-- **STG_PRODUCTS** — 사이트별 상품 목록 (URL 최신값으로 유지)
-- **STG_DAILY_PRICES** — 일별 가격 이력 (append-only)
-- **STG_LATEST_PRICES** — 상품별 최신 가격
-- **STG_ALERTS** — 가격 변동 알림
+- **PRODUCTS** — 사이트별 상품 목록 (URL 최신값으로 유지)
+- **PRICE_HISTORY** — 일별 가격 이력 (append-only)
+- **LATEST_PRICES** — 상품별 최신 가격 **(VIEW, PRICE_HISTORY에서 동적 도출)**
+- **PRICE_ALERTS** — 가격 변동 알림
+- **WATCHLIST** — 관심 상품 목록
 
 ### Analytics — 집계
-- **DAILY_SUMMARY** — 일별 최저/최고/평균 가격
-- **WEEKLY_SUMMARY** — 주별 요약
-- **PRODUCT_STATS** — 상품별 전체 통계 (ALL_TIME_LOW/HIGH)
+- **DAILY_PRICE_STATS** — 일별 최저/최고/평균 가격
+- **WEEKLY_PRICE_STATS** — 주별 요약
+- **PRODUCT_STATS** — 상품별 전체 통계 (MIN_PRICE_EVER/MAX_PRICE_EVER)
 
 ## 대시보드 기능 (localhost:8050)
 
-| 페이지 | 내용 |
-|--------|------|
-| 대시보드 개요 | 추적 제품 수, 카테고리, 사이트, 오늘 수집 건수 + 카테고리별 가격 요약 |
-| 전체 가격표 | 사이트/카테고리 필터, 상품별 최신 가격 |
-| 상품 통계 | 상품별 전체 기간 통계 (최저/최고/평균) |
-| 가격 추이 | 키워드 검색, 사이트별 최저가 라인 차트, 당일 크롤링 비교 |
-| 가격 알림 | 날짜별 구분, 유형/카테고리 필터 (NEW_LOW/NEW_HIGH/PRICE_DROP/PRICE_SPIKE) |
+| 페이지 | URL | 내용 |
+|--------|-----|------|
+| 대시보드 | `/` | 추적 제품 수, 카테고리, 사이트, 오늘 수집 건수 + 카테고리별 가격 요약 |
+| 가격 정보 | `/prices` | 사이트/카테고리 필터, 상품별 최신 가격 |
+| 가격 추이 | `/trends` | 키워드 검색, 사이트별 최저가 라인 차트, 당일 크롤링 비교 |
+| 가격 알림 | `/alerts` | 날짜별 구분, 유형/카테고리 필터 (NEW_LOW/NEW_HIGH/PRICE_DROP/PRICE_SPIKE) |
+| 크롤링 대상 | `/watchlist` | 관심 상품 추가/삭제 관리, 카테고리별 검색 |
+| 파이프라인 ↗ | GitHub Actions | 크롤링 스케줄 실행 이력 (외부 링크) |
 
 ## 알림 기준
 
