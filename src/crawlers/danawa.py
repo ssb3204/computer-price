@@ -21,17 +21,8 @@ from src.crawlers.base import BaseCrawler, DEFAULT_HEADERS
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://search.danawa.com/dsearch.php"
-LIST_URL = "https://prod.danawa.com/list/"
 PRODUCT_BASE = "https://prod.danawa.com/info/?pcode="
 ALLOWED_DOMAINS = {"danawa.com", "prod.danawa.com", "search.danawa.com", "shop.danawa.com"}
-
-# 다나와 카테고리 코드 매핑 (PC 부품 카테고리 제한용)
-_CATEGORY_CATE_CODE: dict[str, str] = {
-    "CPU": "112747",
-    "GPU": "112753",
-    "RAM": "112752",
-    "SSD": "112760",
-}
 
 
 def _is_real_product(item: Tag) -> bool:
@@ -148,11 +139,7 @@ def search_products(query: str, max_results: int = 10, category: str | None = No
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
 
-    cate_code = _CATEGORY_CATE_CODE.get(category.upper()) if category else None
-    if cate_code:
-        url = f"{LIST_URL}?cate={cate_code}&query={query}"
-    else:
-        url = f"{SEARCH_URL}?query={query}&tab=goods"
+    url = f"{SEARCH_URL}?query={query}&tab=goods"
     try:
         resp = session.get(url, timeout=30)
         resp.raise_for_status()

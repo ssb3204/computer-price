@@ -61,11 +61,12 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
 
     session = requests.Session()
     results: list[SearchResult] = []
+    query_lower = query.lower()
 
+    # kjwwang.com은 서버 검색어 필터링을 지원하지 않으므로 카테고리 목록을 가져와 이름으로 필터링
     for page in range(1, MAX_SEARCH_PAGES + 1):
         form_data = {
             "depth": "2", "cate1": "2", "cate2": cate2,
-            "search_word": query,
             "page": str(page),
             "view_type": "list",
         }
@@ -86,6 +87,9 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
             name_tag = item.select_one("a.name")
             if not name_tag:
                 continue
+            product_name = name_tag.get_text(separator=" ", strip=True)
+            if query_lower not in product_name.lower():
+                continue
             href = name_tag.get("href", "")
             pd_no = _extract_pd_no(href)
             if not pd_no:
@@ -97,7 +101,7 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
             product_url = f"{DETAIL_BASE}{href}" if href.startswith("/") else ""
             results.append(SearchResult(
                 pd_no=pd_no,
-                product_name=name_tag.get_text(separator=" ", strip=True),
+                product_name=product_name,
                 url=product_url,
             ))
             if len(results) >= max_results:
