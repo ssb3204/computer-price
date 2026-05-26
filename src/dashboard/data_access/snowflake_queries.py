@@ -243,18 +243,47 @@ def get_alerts(
         cur.close()
 
 
-def get_watch_products(conn: SnowflakeConnection) -> pd.DataFrame:
-    """사용자 크롤링 대상 제품 목록 조회."""
+def get_watchlist_product_ids(conn: SnowflakeConnection) -> set[int]:
+    """WATCHLIST 활성 상품의 PRODUCT_ID 집합을 반환 (URL의 pcode/ProductNo/pd_no로 매칭)."""
     sql = """
-        SELECT ID, QUERY, PCODE, PRODUCT_NAME, CATEGORY, BRAND, ADDED_AT
-        FROM STAGING.WATCHLIST
-        WHERE IS_ACTIVE = TRUE
-        ORDER BY ADDED_AT DESC
+        SELECT DISTINCT p.PRODUCT_ID
+        FROM STAGING.WATCHLIST w
+        JOIN STAGING.PRODUCTS p
+          ON p.SITE = CASE w.SITE
+              WHEN 'danawa'    THEN '다나와'
+              WHEN 'compuzone' THEN '컴퓨존'
+              WHEN 'kjwwang'   THEN '견적왕'
+              ELSE w.SITE
+            END
+          AND (
+              (w.SITE = 'danawa'    AND p.URL ILIKE '%pcode='     || w.PCODE || '%')
+           OR (w.SITE = 'compuzone' AND p.URL ILIKE '%ProductNo=' || w.PCODE || '%')
+           OR (w.SITE = 'kjwwang'   AND p.URL ILIKE '%pd_no='    || w.PCODE || '%')
+          )
+        WHERE w.IS_ACTIVE = TRUE
     """
     cur = conn.cursor()
     try:
         cur.execute("USE DATABASE COMPUTER_PRICE")
         cur.execute(sql)
+        return {row[0] for row in cur.fetchall()}
+    finally:
+        cur.close()
+
+
+def get_watch_products(conn: SnowflakeConnection, site: str | None = None) -> pd.DataFrame:
+    """사용자 크롤링 대상 제품 목록 조회. site 지정 시 해당 사이트만 반환."""
+    site_filter = "AND SITE = %s" if site else ""
+    sql = f"""
+        SELECT ID, SITE, QUERY, PCODE, PRODUCT_NAME, CATEGORY, BRAND, ADDED_AT
+        FROM STAGING.WATCHLIST
+        WHERE IS_ACTIVE = TRUE {site_filter}
+        ORDER BY ADDED_AT DESC
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("USE DATABASE COMPUTER_PRICE")
+        cur.execute(sql, (site,) if site else ())
         cols = [desc[0].lower() for desc in cur.description]
         return pd.DataFrame(cur.fetchall(), columns=cols)
     finally:
@@ -268,22 +297,24 @@ def add_watch_product(
     product_name: str | None,
     category: str,
     brand: str | None = None,
+    site: str = "danawa",
 ) -> None:
-    """크롤링 대상 제품 추가. pcode 중복이면 IS_ACTIVE=TRUE로 복원."""
+    """크롤링 대상 제품 추가. (site, pcode) 중복이면 IS_ACTIVE=TRUE로 복원."""
     cur = conn.cursor()
     try:
         cur.execute("USE DATABASE COMPUTER_PRICE")
         cur.execute("""
             MERGE INTO STAGING.WATCHLIST t
-            USING (SELECT %s AS PCODE) s ON t.PCODE = s.PCODE
+            USING (SELECT %s AS SITE, %s AS PCODE) s
+              ON t.SITE = s.SITE AND t.PCODE = s.PCODE
             WHEN MATCHED THEN
                 UPDATE SET IS_ACTIVE = TRUE, QUERY = %s, PRODUCT_NAME = %s,
                            CATEGORY = %s, BRAND = %s
             WHEN NOT MATCHED THEN
-                INSERT (QUERY, PCODE, PRODUCT_NAME, CATEGORY, BRAND)
-                VALUES (%s, %s, %s, %s, %s)
-        """, (pcode, query, product_name, category, brand,
-              query, pcode, product_name, category, brand))
+                INSERT (SITE, QUERY, PCODE, PRODUCT_NAME, CATEGORY, BRAND)
+                VALUES (%s, %s, %s, %s, %s, %s)
+        """, (site, pcode, query, product_name, category, brand,
+              site, query, pcode, product_name, category, brand))
     finally:
         cur.close()
 

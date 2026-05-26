@@ -13,7 +13,11 @@ from dash.dependencies import ALL, Input, Output, State
 
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
-from src.crawlers.danawa import search_products
+from src.crawlers.compuzone import enrich_names_from_detail as compuzone_enrich
+from src.crawlers.compuzone import search_products as compuzone_search
+from src.crawlers.danawa import enrich_names_from_detail as danawa_enrich
+from src.crawlers.danawa import search_products as danawa_search
+from src.crawlers.pc_estimate import search_products as pcest_search
 from src.dashboard.data_access.snowflake_queries import (
     add_watch_product,
     get_alerts,
@@ -24,6 +28,7 @@ from src.dashboard.data_access.snowflake_queries import (
     get_summary_stats,
     get_today_crawl_comparison,
     get_watch_products,
+    get_watchlist_product_ids,
     remove_watch_product,
 )
 from src.dashboard.helpers import (
@@ -154,6 +159,13 @@ def register_callbacks(app, cache):
             err = db_error_ui()
             return err, err, err
 
+        try:
+            with _get_conn() as conn:
+                watch_ids = get_watchlist_product_ids(conn)
+        except Exception:
+            logger.warning("watchlist ID 조회 실패 (그린닷 비활성화)")
+            watch_ids = set()
+
         cards = dbc.Row([
             dbc.Col(dbc.Card(dbc.CardBody([
                 html.H6("추적 상품", className="card-subtitle text-muted"),
@@ -183,6 +195,11 @@ def register_callbacks(app, cache):
                 cat_df, bordered=True, hover=True, striped=True, color="dark"
             )
 
+        prices_df = prices_df.copy()
+        prices_df["is_watchlist"] = prices_df["product_id"].isin(watch_ids)
+        prices_df = prices_df.sort_values(
+            ["is_watchlist", "category", "price"], ascending=[False, True, True]
+        )
         price_table = make_price_table(prices_df, max_rows=20)
         return cards, cat_table, price_table
 
@@ -200,10 +217,21 @@ def register_callbacks(app, cache):
             logger.exception("가격표 데이터 로드 실패")
             return db_error_ui()
 
+        try:
+            with _get_conn() as conn:
+                watch_ids = get_watchlist_product_ids(conn)
+        except Exception:
+            logger.warning("watchlist ID 조회 실패 (그린닷 비활성화)")
+            watch_ids = set()
+
         if category and category != "ALL":
             df = df[df["category"] == category]
         if site and site != "ALL":
             df = df[df["site"] == site]
+
+        df = df.copy()
+        df["is_watchlist"] = df["product_id"].isin(watch_ids)
+        df = df.sort_values(["is_watchlist", "category", "price"], ascending=[False, True, True])
 
         return make_price_table(df)
 
@@ -219,6 +247,19 @@ def register_callbacks(app, cache):
         except Exception as e:
             logger.exception("상품 통계 데이터 로드 실패")
             return db_error_ui()
+
+        try:
+            with _get_conn() as conn:
+                watch_ids = get_watchlist_product_ids(conn)
+        except Exception:
+            logger.warning("watchlist ID 조회 실패 (그린닷 비활성화)")
+            watch_ids = set()
+
+        df = df.copy()
+        df["is_watchlist"] = df["product_id"].isin(watch_ids)
+        df = df.sort_values(
+            ["is_watchlist", "category", "product_name"], ascending=[False, True, True]
+        )
         return make_stats_table(df)
 
     # ── Trends ──
@@ -461,15 +502,17 @@ def register_callbacks(app, cache):
     @app.callback(
         [Output("watch-search-store", "data"),
          Output("watch-search-results", "children")],
-        Input("watch-search-btn", "n_clicks"),
+        [Input("watch-search-btn", "n_clicks"),
+         Input("watch-search-input", "n_submit")],
         [State("watch-category-select", "value"),
          State("watch-search-input", "value")],
         prevent_initial_call=True,
     )
-    def do_watch_search(_, category, query):
+    def do_watch_search(_btn, _enter, category, query):
         if not query:
             return [], dbc.Alert("검색어를 입력하세요.", color="warning")
-        results = search_products(query, max_results=10)
+        results = danawa_search(query, max_results=10, category=category)
+        results = danawa_enrich(results)
         if not results:
             return [], html.P("검색 결과 없음", className="text-muted")
 
@@ -500,14 +543,18 @@ def register_callbacks(app, cache):
 
     @app.callback(
         Output("watch-list-table", "children"),
-        Input("watch-refresh-trigger", "data"),
+        [Input("watch-refresh-trigger", "data"),
+         Input("watch-category-select", "value")],
     )
-    def load_watch_list(_):
+    def load_watch_list(_, category):
         try:
             with _get_conn() as conn:
-                df = get_watch_products(conn)
+                df = get_watch_products(conn, site="danawa")
         except Exception as e:
             return db_error_ui(str(e))
+
+        if category:
+            df = df[df["category"] == category]
 
         if df.empty:
             return html.P("크롤링 대상이 없습니다.", className="text-muted")
@@ -570,20 +617,22 @@ def register_callbacks(app, cache):
                         brand=None,
                     )
                     df_after = get_watch_products(conn)
-                    send_slack_watch_change("추가", product, df_after)
+                    send_slack_watch_change("추가", product, df_after, site="danawa")
         except Exception:
             logger.exception("watchlist 추가 실패")
 
         return (current_trigger or 0) + 1
 
-    # ── 삭제 버튼 → 모달 열기 ──
+    # ── 삭제 버튼 → 모달 열기 (다나와/견적왕/컴퓨존 공유) ──
     @app.callback(
         [Output("watch-del-confirm-modal", "is_open"),
          Output("watch-pending-del-id", "data")],
-        Input({"type": "watch-del-btn", "index": ALL}, "n_clicks"),
+        [Input({"type": "watch-del-btn", "index": ALL}, "n_clicks"),
+         Input({"type": "pcest-del-btn", "index": ALL}, "n_clicks"),
+         Input({"type": "compuzone-del-btn", "index": ALL}, "n_clicks")],
         prevent_initial_call=True,
     )
-    def open_del_modal(del_clicks):
+    def open_del_modal(danawa_clicks, pcest_clicks, compuzone_clicks):
         ctx = dash.callback_context
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             raise dash.exceptions.PreventUpdate
@@ -595,24 +644,28 @@ def register_callbacks(app, cache):
     # ── 모달 확인/취소 ──
     @app.callback(
         [Output("watch-del-confirm-modal", "is_open", allow_duplicate=True),
-         Output("watch-refresh-trigger", "data", allow_duplicate=True)],
+         Output("watch-refresh-trigger", "data", allow_duplicate=True),
+         Output("pcest-refresh-trigger", "data", allow_duplicate=True),
+         Output("compuzone-refresh-trigger", "data", allow_duplicate=True)],
         [Input("watch-del-confirm-btn", "n_clicks"),
          Input("watch-del-cancel-btn", "n_clicks")],
         [State("watch-pending-del-id", "data"),
-         State("watch-refresh-trigger", "data")],
+         State("watch-refresh-trigger", "data"),
+         State("pcest-refresh-trigger", "data"),
+         State("compuzone-refresh-trigger", "data")],
         prevent_initial_call=True,
     )
-    def handle_del_confirm(confirm_clicks, cancel_clicks, watch_id, current_trigger):
+    def handle_del_confirm(confirm_clicks, cancel_clicks, watch_id, danawa_trigger, pcest_trigger, compuzone_trigger):
         ctx = dash.callback_context
         if not ctx.triggered or not ctx.triggered[0]["value"]:
             raise dash.exceptions.PreventUpdate
 
         triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
         if triggered_id == "watch-del-cancel-btn":
-            return False, dash.no_update
+            return False, dash.no_update, dash.no_update, dash.no_update
 
         if watch_id is None:
-            return False, dash.no_update
+            return False, dash.no_update, dash.no_update, dash.no_update
 
         try:
             with _get_conn() as conn:
@@ -626,11 +679,300 @@ def register_callbacks(app, cache):
                         "product_name": r.get("product_name") or r["query"],
                         "pcode": r["pcode"],
                         "category": r["category"],
-                    }, df_after)
+                    }, df_after, site=r.get("site", "danawa"))
         except Exception:
             logger.exception("watchlist 삭제 실패")
 
-        return False, (current_trigger or 0) + 1
+        return (
+            False,
+            (danawa_trigger or 0) + 1,
+            (pcest_trigger or 0) + 1,
+            (compuzone_trigger or 0) + 1,
+        )
+
+    # ── 카테고리 변경 시 검색 결과 초기화 ──
+
+    @app.callback(
+        [Output("watch-search-results", "children", allow_duplicate=True),
+         Output("watch-search-store", "data", allow_duplicate=True),
+         Output("watch-search-input", "value")],
+        Input("watch-category-select", "value"),
+        prevent_initial_call=True,
+    )
+    def clear_watch_search_on_category_change(_):
+        return html.Div(), [], ""
+
+    @app.callback(
+        [Output("pcest-search-results", "children", allow_duplicate=True),
+         Output("pcest-search-store", "data", allow_duplicate=True),
+         Output("pcest-search-input", "value")],
+        Input("pcest-category-select", "value"),
+        prevent_initial_call=True,
+    )
+    def clear_pcest_search_on_category_change(_):
+        return html.Div(), [], ""
+
+    # ── 견적왕 Watch list ──
+
+    @app.callback(
+        [Output("pcest-search-store", "data"),
+         Output("pcest-search-results", "children")],
+        [Input("pcest-search-btn", "n_clicks"),
+         Input("pcest-search-input", "n_submit")],
+        [State("pcest-category-select", "value"),
+         State("pcest-search-input", "value")],
+        prevent_initial_call=True,
+    )
+    def do_pcest_search(_btn, _enter, category, query):
+        if not query:
+            return [], dbc.Alert("검색어를 입력하세요.", color="warning")
+        results = pcest_search(query, category=category or "GPU", max_results=10)
+        if not results:
+            return [], html.P("검색 결과 없음", className="text-muted")
+
+        stored = [
+            {"pd_no": r.pd_no, "product_name": r.product_name, "url": r.url}
+            for r in results
+        ]
+        cards = [
+            dbc.Card(dbc.CardBody(
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(r["product_name"][:80], className="text-light fw-bold"),
+                        html.Small(f"pd_no: {r['pd_no']}", className="text-muted"),
+                    ], width=10),
+                    dbc.Col(
+                        dbc.Button(
+                            "추가",
+                            id={"type": "pcest-add-btn", "index": i},
+                            color="success", size="sm",
+                        ),
+                        width=2, className="text-end d-flex align-items-center justify-content-end",
+                    ),
+                ])
+            ), color="dark", className="mb-2")
+            for i, r in enumerate(stored)
+        ]
+        return stored, cards
+
+    @app.callback(
+        Output("pcest-list-table", "children"),
+        [Input("pcest-refresh-trigger", "data"),
+         Input("pcest-category-select", "value")],
+    )
+    def load_pcest_list(_, category):
+        try:
+            with _get_conn() as conn:
+                df = get_watch_products(conn, site="kjwwang")
+        except Exception as e:
+            return db_error_ui(str(e))
+
+        if category:
+            df = df[df["category"] == category]
+
+        if df.empty:
+            return html.P("크롤링 대상이 없습니다.", className="text-muted")
+
+        rows = []
+        for _, row in df.iterrows():
+            watch_id = str(int(row["id"]))
+            _pname = row.get("product_name")
+            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
+            rows.append(html.Tr([
+                html.Td(row["category"]),
+                html.Td(row.get("brand") or "-"),
+                html.Td(display_name),
+                html.Td(str(row.get("added_at", ""))[:10]),
+                html.Td(
+                    dbc.Button(
+                        "삭제",
+                        id={"type": "pcest-del-btn", "index": watch_id},
+                        color="danger", size="sm",
+                    )
+                ),
+            ]))
+
+        header = html.Thead(html.Tr([
+            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
+            html.Th("추가일"), html.Th(""),
+        ]))
+        return dbc.Table([header, html.Tbody(rows)],
+                         bordered=True, hover=True, striped=True, color="dark")
+
+    @app.callback(
+        Output("pcest-refresh-trigger", "data", allow_duplicate=True),
+        Input({"type": "pcest-add-btn", "index": ALL}, "n_clicks"),
+        [
+            State("pcest-search-store", "data"),
+            State("pcest-category-select", "value"),
+            State("pcest-refresh-trigger", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_pcest_add(add_clicks, search_results, category, current_trigger):
+        ctx = dash.callback_context
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            raise dash.exceptions.PreventUpdate
+
+        triggered_prop = ctx.triggered[0]["prop_id"]
+        btn_idx = json.loads(triggered_prop.split(".")[0])["index"]
+
+        try:
+            with _get_conn() as conn:
+                if search_results:
+                    product = search_results[int(btn_idx)]
+                    add_watch_product(
+                        conn,
+                        query=product["product_name"],
+                        pcode=product["pd_no"],
+                        product_name=product["product_name"],
+                        category=category or "기타",
+                        brand=None,
+                        site="kjwwang",
+                    )
+                    df_after = get_watch_products(conn)
+                    send_slack_watch_change("추가", product, df_after, site="kjwwang")
+        except Exception:
+            logger.exception("pcest watchlist 추가 실패")
+
+        return (current_trigger or 0) + 1
+
+    # ── 컴퓨존 Watch list ──
+
+    @app.callback(
+        [Output("compuzone-search-store", "data"),
+         Output("compuzone-search-results", "children")],
+        [Input("compuzone-search-btn", "n_clicks"),
+         Input("compuzone-search-input", "n_submit")],
+        [State("compuzone-category-select", "value"),
+         State("compuzone-search-input", "value")],
+        prevent_initial_call=True,
+    )
+    def do_compuzone_search(_btn, _enter, category, query):
+        if not query:
+            return [], dbc.Alert("검색어를 입력하세요.", color="warning")
+        results = compuzone_search(query, category=category or "GPU", max_results=10)
+        if not results:
+            return [], html.P("검색 결과 없음", className="text-muted")
+        if category in ("RAM", "SSD"):
+            results = compuzone_enrich(results)
+
+        stored = [
+            {"product_no": r.product_no, "product_name": r.product_name, "url": r.url}
+            for r in results
+        ]
+        cards = [
+            dbc.Card(dbc.CardBody(
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(r["product_name"][:80], className="text-light fw-bold"),
+                        html.Small(f"product_no: {r['product_no']}", className="text-muted"),
+                    ], width=10),
+                    dbc.Col(
+                        dbc.Button(
+                            "추가",
+                            id={"type": "compuzone-add-btn", "index": i},
+                            color="success", size="sm",
+                        ),
+                        width=2, className="text-end d-flex align-items-center justify-content-end",
+                    ),
+                ])
+            ), color="dark", className="mb-2")
+            for i, r in enumerate(stored)
+        ]
+        return stored, cards
+
+    @app.callback(
+        Output("compuzone-list-table", "children"),
+        [Input("compuzone-refresh-trigger", "data"),
+         Input("compuzone-category-select", "value")],
+    )
+    def load_compuzone_list(_, category):
+        try:
+            with _get_conn() as conn:
+                df = get_watch_products(conn, site="compuzone")
+        except Exception as e:
+            return db_error_ui(str(e))
+
+        if category:
+            df = df[df["category"] == category]
+
+        if df.empty:
+            return html.P("크롤링 대상이 없습니다.", className="text-muted")
+
+        rows = []
+        for _, row in df.iterrows():
+            watch_id = str(int(row["id"]))
+            _pname = row.get("product_name")
+            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
+            rows.append(html.Tr([
+                html.Td(row["category"]),
+                html.Td(row.get("brand") or "-"),
+                html.Td(display_name),
+                html.Td(str(row.get("added_at", ""))[:10]),
+                html.Td(
+                    dbc.Button(
+                        "삭제",
+                        id={"type": "compuzone-del-btn", "index": watch_id},
+                        color="danger", size="sm",
+                    )
+                ),
+            ]))
+
+        header = html.Thead(html.Tr([
+            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
+            html.Th("추가일"), html.Th(""),
+        ]))
+        return dbc.Table([header, html.Tbody(rows)],
+                         bordered=True, hover=True, striped=True, color="dark")
+
+    @app.callback(
+        Output("compuzone-refresh-trigger", "data", allow_duplicate=True),
+        Input({"type": "compuzone-add-btn", "index": ALL}, "n_clicks"),
+        [
+            State("compuzone-search-store", "data"),
+            State("compuzone-category-select", "value"),
+            State("compuzone-refresh-trigger", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_compuzone_add(add_clicks, search_results, category, current_trigger):
+        ctx = dash.callback_context
+        if not ctx.triggered or not ctx.triggered[0]["value"]:
+            raise dash.exceptions.PreventUpdate
+
+        triggered_prop = ctx.triggered[0]["prop_id"]
+        btn_idx = json.loads(triggered_prop.split(".")[0])["index"]
+
+        try:
+            with _get_conn() as conn:
+                if search_results:
+                    product = search_results[int(btn_idx)]
+                    add_watch_product(
+                        conn,
+                        query=product["product_name"],
+                        pcode=product["product_no"],
+                        product_name=product["product_name"],
+                        category=category or "기타",
+                        brand=None,
+                        site="compuzone",
+                    )
+                    df_after = get_watch_products(conn)
+                    send_slack_watch_change("추가", product, df_after, site="compuzone")
+        except Exception:
+            logger.exception("compuzone watchlist 추가 실패")
+
+        return (current_trigger or 0) + 1
+
+    @app.callback(
+        [Output("compuzone-search-results", "children", allow_duplicate=True),
+         Output("compuzone-search-store", "data", allow_duplicate=True),
+         Output("compuzone-search-input", "value")],
+        Input("compuzone-category-select", "value"),
+        prevent_initial_call=True,
+    )
+    def clear_compuzone_search_on_category_change(_):
+        return html.Div(), [], ""
 
     # 캐시 워밍에서 호출할 수 있도록 fetcher 함수들을 반환.
     # 워밍은 각 함수를 인자 없이(기본값으로) 호출하므로, 파라미터 없는 전체 데이터 쿼리만 포함한다.
