@@ -239,9 +239,12 @@ def register_callbacks(app, cache):
 
     @app.callback(
         Output("product-stats-table", "children"),
-        Input("refresh-interval", "n_intervals"),
+        [Input("refresh-interval", "n_intervals"),
+         Input("url", "pathname")],
     )
-    def update_stats(_):
+    def update_stats(_, pathname):
+        if pathname != "/prices":
+            raise dash.exceptions.PreventUpdate
         try:
             df = _fetch_product_stats()
         except Exception as e:

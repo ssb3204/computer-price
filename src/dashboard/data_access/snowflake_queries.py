@@ -5,8 +5,8 @@ from snowflake.connector import SnowflakeConnection
 
 
 def get_latest_prices_all(conn: SnowflakeConnection) -> pd.DataFrame:
-    """전체 상품 최신 가격 목록 (대시보드 메인 테이블)."""
-    sql = """
+    """WATCHLIST 활성 상품의 최신 가격 목록 (대시보드 메인 테이블)."""
+    sql = f"""
         SELECT
             p.PRODUCT_ID,
             p.SITE,
@@ -18,6 +18,7 @@ def get_latest_prices_all(conn: SnowflakeConnection) -> pd.DataFrame:
             p.URL
         FROM STAGING.LATEST_PRICES lp
         JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = lp.PRODUCT_ID
+        WHERE {_WATCHLIST_EXISTS}
         ORDER BY p.CATEGORY, lp.PRICE ASC
     """
     cur = conn.cursor()
@@ -55,8 +56,8 @@ def get_summary_stats(conn: SnowflakeConnection) -> dict:
 
 
 def get_product_stats(conn: SnowflakeConnection) -> pd.DataFrame:
-    """상품별 전체 기간 통계."""
-    sql = """
+    """WATCHLIST 활성 상품의 전체 기간 통계."""
+    sql = f"""
         SELECT
             ps.PRODUCT_ID,
             p.SITE,
@@ -71,6 +72,7 @@ def get_product_stats(conn: SnowflakeConnection) -> pd.DataFrame:
             ps.TOTAL_RECORDS
         FROM ANALYTICS.PRODUCT_STATS ps
         JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = ps.PRODUCT_ID
+        WHERE {_WATCHLIST_EXISTS}
         ORDER BY p.CATEGORY, p.PRODUCT_NAME
     """
     cur = conn.cursor()
@@ -134,13 +136,30 @@ def get_price_trend(
         cur.close()
 
 
+_WATCHLIST_EXISTS = """EXISTS (
+            SELECT 1 FROM STAGING.WATCHLIST w
+            WHERE w.IS_ACTIVE = TRUE
+              AND p.SITE = CASE w.SITE
+                      WHEN 'danawa'    THEN '다나와'
+                      WHEN 'compuzone' THEN '컴퓨존'
+                      WHEN 'kjwwang'   THEN '견적왕'
+                      ELSE w.SITE
+                    END
+              AND (
+                  (w.SITE = 'danawa'    AND p.URL ILIKE '%pcode='     || w.PCODE || '%')
+               OR (w.SITE = 'compuzone' AND p.URL ILIKE '%ProductNo=' || w.PCODE || '%')
+               OR (w.SITE = 'kjwwang'   AND p.URL ILIKE '%pd_no='    || w.PCODE || '%')
+              )
+        )"""
+
+
 def get_today_crawl_comparison(
     conn: SnowflakeConnection,
     category: str | None = None,
     search: str | None = None,
 ) -> pd.DataFrame:
-    """오늘 크롤링 4회(1~4차) 가격 비교."""
-    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()"]
+    """오늘 크롤링 4회(1~4차) 가격 비교 — WATCHLIST 활성 상품만."""
+    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()", _WATCHLIST_EXISTS]
     params: list = []
 
     if category and category != "ALL":
