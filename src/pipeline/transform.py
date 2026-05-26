@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _SITE_DISPLAY_MAP = {
     "danawa":      "다나와",
     "compuzone":   "컴퓨존",
-    "pc_estimate": "견적왕",
+    "kjwwang":     "견적왕",
 }
 
 

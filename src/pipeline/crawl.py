@@ -23,8 +23,8 @@ def crawl_all_sites(settings: SnowflakeSettings) -> tuple[list[RawCrawledPrice],
     with get_connection(settings) as conn:
         crawlers = [
             DanawaCrawler(conn=conn),
-            CompuzoneCrawler(),
-            PCEstimateCrawler(),
+            CompuzoneCrawler(conn=conn),
+            PCEstimateCrawler(conn=conn),
         ]
         for crawler in crawlers:
             try:
