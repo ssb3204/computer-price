@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.crawlers.compuzone import CATEGORY_TARGETS, CompuzoneCrawler
+from src.crawlers.compuzone import CompuzoneCrawler
 
 
 def _make_item(pno: str, name: str, price: str) -> str:

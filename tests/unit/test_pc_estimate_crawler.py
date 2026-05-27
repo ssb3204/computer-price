@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.crawlers.pc_estimate import CATEGORY_TARGETS, PCEstimateCrawler
+from src.crawlers.pc_estimate import PCEstimateCrawler
 
 
 def _make_item(href: str, name: str, price: str) -> str:
