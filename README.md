@@ -79,7 +79,7 @@ computer_price/
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
 │   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
 │   └── dashboard/       # Dash 웹 대시보드
-│       ├── layouts/     # 페이지별 레이아웃 (6개 페이지)
+│       ├── layouts/     # 페이지별 레이아웃 (5개 페이지)
 │       └── data_access/ # Snowflake 쿼리
 ├── snowflake/           # Snowflake DDL (3-Layer)
 ├── tests/
