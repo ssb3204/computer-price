@@ -4,6 +4,7 @@ import dash_bootstrap_components as dbc
 from dash import dcc, html
 
 _CATEGORY_OPTIONS = [
+    {"label": "전체", "value": "ALL"},
     {"label": "CPU", "value": "CPU"},
     {"label": "GPU", "value": "GPU"},
     {"label": "RAM", "value": "RAM"},
@@ -16,7 +17,7 @@ def _search_card(
     input_id: str,
     btn_id: str,
     results_id: str,
-    default_category: str = "GPU",
+    default_category: str = "ALL",
 ) -> dbc.Card:
     return dbc.Card(dbc.CardBody([
         html.H5("상품 검색 및 추가", className="card-title mb-3"),

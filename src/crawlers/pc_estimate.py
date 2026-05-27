@@ -176,7 +176,7 @@ class PCEstimateCrawler(BaseCrawler):
             cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
                 "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = 'kjwwang'"
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '견적왕'"
             )
             return [
                 {"query": row[0], "pd_no": row[1], "category": row[2], "brand": row[3]}

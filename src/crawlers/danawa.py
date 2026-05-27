@@ -218,7 +218,7 @@ class DanawaCrawler(BaseCrawler):
             cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
                 "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = 'danawa'"
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '다나와'"
             )
             return [
                 {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}

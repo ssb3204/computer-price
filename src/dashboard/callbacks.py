@@ -41,6 +41,7 @@ from src.dashboard.helpers import (
     empty_chart,
     make_price_table,
     make_stats_table,
+    make_watchlist_table,
     send_slack_watch_change,
 )
 from src.dashboard.layouts.alerts import alerts_layout
@@ -253,12 +254,10 @@ def register_callbacks(app, cache):
 
     @app.callback(
         Output("product-stats-table", "children"),
-        [Input("refresh-interval", "n_intervals"),
-         Input("url", "pathname")],
+        [Input("stats-category-filter", "data"),
+         Input("stats-site-filter", "data")],
     )
-    def update_stats(_, pathname):
-        if pathname != "/prices":
-            raise dash.exceptions.PreventUpdate
+    def update_stats(category, site):
         try:
             df = _fetch_product_stats()
         except Exception as e:
@@ -274,6 +273,12 @@ def register_callbacks(app, cache):
 
         df = df.copy()
         df["is_watchlist"] = df["product_id"].isin(watch_ids)
+
+        if category and category != "ALL":
+            df = df[df["category"] == category]
+        if site and site != "ALL":
+            df = df[df["site"] == site]
+
         df = df.sort_values(
             ["is_watchlist", "category", "product_name"], ascending=[False, True, True]
         )
@@ -511,6 +516,8 @@ def register_callbacks(app, cache):
     _register_button_toggle(app, "trend-period", "period-btn-", [0, 7, 14, 30], 0)
     _register_button_toggle(app, "price-category-filter", "price-cat-btn-", CATEGORIES, "ALL")
     _register_button_toggle(app, "price-site-filter", "price-site-btn-", ["ALL", "다나와", "컴퓨존", "견적왕"], "ALL")
+    _register_button_toggle(app, "stats-category-filter", "stats-cat-btn-", CATEGORIES, "ALL")
+    _register_button_toggle(app, "stats-site-filter", "stats-site-btn-", ["ALL", "다나와", "컴퓨존", "견적왕"], "ALL")
     _register_button_toggle(app, "alert-type-filter", "alert-btn-", ["ALL", "NEW_LOW", "NEW_HIGH", "PRICE_DROP", "PRICE_SPIKE"], "ALL")
     _register_button_toggle(app, "alert-category-filter", "alert-cat-btn-", CATEGORIES, "ALL")
 
@@ -566,41 +573,14 @@ def register_callbacks(app, cache):
     def load_watch_list(_, category):
         try:
             with _get_conn() as conn:
-                df = get_watch_products(conn, site="danawa")
+                df = get_watch_products(conn, site="다나와")
         except Exception as e:
             return db_error_ui(str(e))
 
-        if category:
+        if category and category != "ALL":
             df = df[df["category"] == category]
 
-        if df.empty:
-            return html.P("크롤링 대상이 없습니다.", className="text-muted")
-
-        rows = []
-        for _, row in df.iterrows():
-            watch_id = str(int(row["id"]))
-            _pname = row.get("product_name")
-            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
-            rows.append(html.Tr([
-                html.Td(row["category"]),
-                html.Td(row.get("brand") or "-"),
-                html.Td(display_name),
-                html.Td(str(row.get("added_at", ""))[:10]),
-                html.Td(
-                    dbc.Button(
-                        "삭제",
-                        id={"type": "watch-del-btn", "index": watch_id},
-                        color="danger", size="sm",
-                    )
-                ),
-            ]))
-
-        header = html.Thead(html.Tr([
-            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
-            html.Th("추가일"), html.Th(""),
-        ]))
-        return dbc.Table([header, html.Tbody(rows)],
-                         bordered=True, hover=True, striped=True, color="dark")
+        return make_watchlist_table(df, del_btn_type="watch-del-btn")
 
     # ── 추가 버튼 처리 ──
     @app.callback(
@@ -634,9 +614,9 @@ def register_callbacks(app, cache):
                         brand=None,
                     )
                     df_after = get_watch_products(conn)
-                    send_slack_watch_change("추가", product, df_after, site="danawa")
+                    send_slack_watch_change("추가", product, df_after, site="다나와")
                     _trigger_single_crawl(
-                        cache, "danawa",
+                        cache, "다나와",
                         product["product_name"], product["pcode"],
                         category or "기타", None,
                     )
@@ -701,7 +681,7 @@ def register_callbacks(app, cache):
                         "product_name": r.get("product_name") or r["query"],
                         "pcode": r["pcode"],
                         "category": r["category"],
-                    }, df_after, site=r.get("site", "danawa"))
+                    }, df_after, site=r.get("site", "다나와"))
         except Exception:
             logger.exception("watchlist 삭제 실패")
 
@@ -785,41 +765,14 @@ def register_callbacks(app, cache):
     def load_pcest_list(_, category):
         try:
             with _get_conn() as conn:
-                df = get_watch_products(conn, site="kjwwang")
+                df = get_watch_products(conn, site="견적왕")
         except Exception as e:
             return db_error_ui(str(e))
 
-        if category:
+        if category and category != "ALL":
             df = df[df["category"] == category]
 
-        if df.empty:
-            return html.P("크롤링 대상이 없습니다.", className="text-muted")
-
-        rows = []
-        for _, row in df.iterrows():
-            watch_id = str(int(row["id"]))
-            _pname = row.get("product_name")
-            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
-            rows.append(html.Tr([
-                html.Td(row["category"]),
-                html.Td(row.get("brand") or "-"),
-                html.Td(display_name),
-                html.Td(str(row.get("added_at", ""))[:10]),
-                html.Td(
-                    dbc.Button(
-                        "삭제",
-                        id={"type": "pcest-del-btn", "index": watch_id},
-                        color="danger", size="sm",
-                    )
-                ),
-            ]))
-
-        header = html.Thead(html.Tr([
-            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
-            html.Th("추가일"), html.Th(""),
-        ]))
-        return dbc.Table([header, html.Tbody(rows)],
-                         bordered=True, hover=True, striped=True, color="dark")
+        return make_watchlist_table(df, del_btn_type="pcest-del-btn")
 
     @app.callback(
         Output("pcest-refresh-trigger", "data", allow_duplicate=True),
@@ -850,12 +803,12 @@ def register_callbacks(app, cache):
                         product_name=product["product_name"],
                         category=category or "기타",
                         brand=None,
-                        site="kjwwang",
+                        site="견적왕",
                     )
                     df_after = get_watch_products(conn)
-                    send_slack_watch_change("추가", product, df_after, site="kjwwang")
+                    send_slack_watch_change("추가", product, df_after, site="견적왕")
                     _trigger_single_crawl(
-                        cache, "kjwwang",
+                        cache, "견적왕",
                         product["product_name"], product["pd_no"],
                         category or "기타", None,
                     )
@@ -917,41 +870,14 @@ def register_callbacks(app, cache):
     def load_compuzone_list(_, category):
         try:
             with _get_conn() as conn:
-                df = get_watch_products(conn, site="compuzone")
+                df = get_watch_products(conn, site="컴퓨존")
         except Exception as e:
             return db_error_ui(str(e))
 
-        if category:
+        if category and category != "ALL":
             df = df[df["category"] == category]
 
-        if df.empty:
-            return html.P("크롤링 대상이 없습니다.", className="text-muted")
-
-        rows = []
-        for _, row in df.iterrows():
-            watch_id = str(int(row["id"]))
-            _pname = row.get("product_name")
-            display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
-            rows.append(html.Tr([
-                html.Td(row["category"]),
-                html.Td(row.get("brand") or "-"),
-                html.Td(display_name),
-                html.Td(str(row.get("added_at", ""))[:10]),
-                html.Td(
-                    dbc.Button(
-                        "삭제",
-                        id={"type": "compuzone-del-btn", "index": watch_id},
-                        color="danger", size="sm",
-                    )
-                ),
-            ]))
-
-        header = html.Thead(html.Tr([
-            html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
-            html.Th("추가일"), html.Th(""),
-        ]))
-        return dbc.Table([header, html.Tbody(rows)],
-                         bordered=True, hover=True, striped=True, color="dark")
+        return make_watchlist_table(df, del_btn_type="compuzone-del-btn")
 
     @app.callback(
         Output("compuzone-refresh-trigger", "data", allow_duplicate=True),
@@ -982,12 +908,12 @@ def register_callbacks(app, cache):
                         product_name=product["product_name"],
                         category=category or "기타",
                         brand=None,
-                        site="compuzone",
+                        site="컴퓨존",
                     )
                     df_after = get_watch_products(conn)
-                    send_slack_watch_change("추가", product, df_after, site="compuzone")
+                    send_slack_watch_change("추가", product, df_after, site="컴퓨존")
                     _trigger_single_crawl(
-                        cache, "compuzone",
+                        cache, "컴퓨존",
                         product["product_name"], product["product_no"],
                         category or "기타", None,
                     )

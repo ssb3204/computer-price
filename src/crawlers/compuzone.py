@@ -317,7 +317,7 @@ class CompuzoneCrawler(BaseCrawler):
             cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
                 "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = 'compuzone'"
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '컴퓨존'"
             )
             return [
                 {"query": row[0], "product_no": row[1], "category": row[2], "brand": row[3]}

@@ -55,9 +55,9 @@ def crawl_all_sites(settings: SnowflakeSettings) -> tuple[list[RawCrawledPrice],
 
 
 _SINGLE_CRAWL_FN = {
-    "danawa":    danawa_single,
-    "compuzone": compuzone_single,
-    "kjwwang":   pcest_single,
+    "다나와": danawa_single,
+    "컴퓨존": compuzone_single,
+    "견적왕": pcest_single,
 }
 
 
