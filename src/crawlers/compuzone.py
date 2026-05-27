@@ -62,6 +62,39 @@ def _fetch_product_title(url: str) -> str | None:
     return re.sub(r"\s*:\s*컴퓨존.*$", "", name).strip()
 
 
+def _fetch_price_from_detail(product_no: str) -> tuple[str, str] | None:
+    """상세 페이지에서 직접 상품명·가격을 추출한다 (목록/검색 미노출 상품 대응).
+
+    컴퓨존은 일부 상품(벌크·단종 임박 등)이 카테고리 목록·검색에 노출되지 않으나
+    상세 페이지는 유효하게 존재한다. todayCookie JS 호출에서 가격을 추출한다.
+
+    Returns: (product_name, price_str) — 실패 시 None
+    """
+    url = f"{DETAIL_BASE}?ProductNo={product_no}"
+    try:
+        resp = requests.get(url, timeout=15, stream=True)
+        resp.raise_for_status()
+        buf = b""
+        for chunk in resp.iter_content(chunk_size=8192):
+            buf += chunk
+            if b"todayCookie" in buf:
+                resp.close()
+                break
+        text = buf.decode("euc-kr", errors="ignore")
+    except requests.RequestException:
+        return None
+
+    m_price = re.search(r'todayCookie\([^,]+,\s*"[^"]+",\s*"(\d+)"', text)
+    if not m_price:
+        return None
+
+    m_title = re.search(r"<title>(.+?)</title>", text, re.DOTALL)
+    if not m_title:
+        return None
+    name = re.sub(r"\s*:\s*컴퓨존.*$", "", m_title.group(1)).strip()
+    return name, m_price.group(1)
+
+
 def enrich_names_from_detail(results: list[SearchResult]) -> list[SearchResult]:
     """검색 결과 상품명을 상세 페이지 title로 교체해 용량 정보를 포함시킨다."""
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -252,6 +285,18 @@ def crawl_single(
                 brand=brand, url=product_url, crawled_at=now,
             )
 
+    # 3차: 상세 페이지 직접 스크래핑 (목록·검색 미노출 상품 대응)
+    detail = _fetch_price_from_detail(product_no)
+    if detail:
+        name, price_str = detail
+        product_url = f"{DETAIL_BASE}?ProductNo={product_no}&BigDivNo=4&MediumDivNo={medium_div_no}"
+        logger.info("compuzone crawl_single(detail): product_no=%s 발견", product_no)
+        return RawCrawledPrice(
+            site="compuzone", category=category,
+            product_name=name, price_text=price_str,
+            brand=brand, url=product_url, crawled_at=now,
+        )
+
     logger.warning("compuzone crawl_single: product_no=%s 미발견", product_no)
     return None
 
@@ -404,10 +449,30 @@ class CompuzoneCrawler(BaseCrawler):
                 if result:
                     all_raw.append(result)
                 else:
-                    logger.warning(
-                        "검색 fallback도 실패: %s (ProductNo=%s)",
-                        target["query"], target["product_no"],
-                    )
+                    # 최종 fallback: 상세 페이지 직접 스크래핑
+                    detail = _fetch_price_from_detail(target["product_no"])
+                    if detail:
+                        name, price_str = detail
+                        mdno = CATEGORY_MEDIUM_DIV_NO.get(target["category"], "")
+                        product_url = (
+                            f"{DETAIL_BASE}?ProductNo={target['product_no']}"
+                            f"&BigDivNo=4&MediumDivNo={mdno}"
+                        )
+                        all_raw.append(RawCrawledPrice(
+                            site="compuzone", category=target["category"],
+                            product_name=name, price_text=price_str,
+                            brand=target["brand"], url=product_url,
+                            crawled_at=datetime.now(timezone.utc),
+                        ))
+                        logger.info(
+                            "상세 페이지 fallback 성공: %s (ProductNo=%s)",
+                            target["query"], target["product_no"],
+                        )
+                    else:
+                        logger.warning(
+                            "모든 경로 실패: %s (ProductNo=%s)",
+                            target["query"], target["product_no"],
+                        )
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw
