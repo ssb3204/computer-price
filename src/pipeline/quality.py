@@ -121,11 +121,16 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
         row = cur.fetchone()
         raw_count, staging_count = int(row[0]), int(row[1])
 
-        # 2. Analytics 미집계 상품 (PRODUCTS에 있지만 PRODUCT_STATS에 없음)
+        # 2. Analytics 미집계 상품 (PRICE_HISTORY는 있지만 PRODUCT_STATS에 없는 상품)
+        # PRICE_HISTORY 없는 신규 미크롤링 상품은 정상이므로 제외
         cur.execute("""
             SELECT COUNT(*)
             FROM STAGING.PRODUCTS p
-            WHERE NOT EXISTS (
+            WHERE EXISTS (
+                SELECT 1 FROM STAGING.PRICE_HISTORY ph
+                WHERE ph.PRODUCT_ID = p.PRODUCT_ID
+            )
+            AND NOT EXISTS (
                 SELECT 1 FROM ANALYTICS.PRODUCT_STATS ps
                 WHERE ps.PRODUCT_ID = p.PRODUCT_ID
             )

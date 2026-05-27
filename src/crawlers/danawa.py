@@ -5,6 +5,7 @@
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -47,7 +48,7 @@ def _extract_pcode(item: Tag) -> str | None:
 
 def _extract_name(item: Tag) -> str | None:
     el = item.select_one(".prod_name a")
-    return el.get_text(strip=True) if el else None
+    return el.get_text(separator=" ", strip=True) if el else None
 
 
 def _extract_price_text(item: Tag) -> str | None:
@@ -75,12 +76,62 @@ class SearchResult:
     url: str
 
 
-def search_products(query: str, max_results: int = 10) -> list[SearchResult]:
+def _fetch_product_title(pcode: str) -> str | None:
+    """상세 페이지 <title>에서 용량 포함 전체 상품명을 추출한다.
+
+    <title> 태그가 나올 때까지만 읽어 네트워크 비용을 줄인다.
+    """
+    try:
+        resp = requests.get(
+            f"{PRODUCT_BASE}{pcode}",
+            headers=DEFAULT_HEADERS,
+            timeout=10,
+            stream=True,
+        )
+        resp.raise_for_status()
+        buf = b""
+        for chunk in resp.iter_content(chunk_size=4096):
+            buf += chunk
+            if b"</title>" in buf:
+                resp.close()
+                break
+        text = buf.decode("utf-8", errors="ignore")
+    except requests.RequestException:
+        return None
+
+    m = re.search(r"<title>(.+?)</title>", text, re.DOTALL)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    return re.sub(r"\s*:\s*다나와.*$", "", name).strip()
+
+
+def enrich_names_from_detail(results: list[SearchResult]) -> list[SearchResult]:
+    """검색 결과 상품명을 상세 페이지 title로 교체해 용량 정보를 포함시킨다.
+
+    병렬 fetch로 지연을 최소화한다.
+    """
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        pcode_to_future = {r.pcode: executor.submit(_fetch_product_title, r.pcode) for r in results}
+        enriched: dict[str, str] = {}
+        for pcode, future in pcode_to_future.items():
+            title = future.result()
+            if title:
+                enriched[pcode] = title
+
+    return [
+        SearchResult(pcode=r.pcode, product_name=enriched.get(r.pcode, r.product_name), url=r.url)
+        for r in results
+    ]
+
+
+def search_products(query: str, max_results: int = 10, category: str | None = None) -> list[SearchResult]:
     """제품명으로 다나와를 검색해 매칭되는 상품 목록을 반환한다.
 
     Args:
         query: 검색어 (예: "RTX 5080", "라이젠 7800X3D")
         max_results: 최대 반환 개수
+        category: 카테고리 ("CPU" | "GPU" | "RAM" | "SSD") — 지정 시 해당 PC 부품 카테고리로 제한
 
     Returns:
         SearchResult 리스트 (최대 max_results개)
@@ -115,6 +166,42 @@ def search_products(query: str, max_results: int = 10) -> list[SearchResult]:
     return results
 
 
+def crawl_single(
+    query: str, pcode: str, category: str, brand: str | None = None
+) -> RawCrawledPrice | None:
+    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    url = f"{SEARCH_URL}?query={query}&tab=goods"
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+    except requests.RequestException as e:
+        logger.error("danawa crawl_single 실패: %s", e)
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    now = datetime.now(timezone.utc)
+    for item in soup.select("li.prod_item"):
+        if not _is_real_product(item):
+            continue
+        if _extract_pcode(item) != pcode:
+            continue
+        name = _extract_name(item)
+        price_text = _extract_price_text(item)
+        if name is None or price_text is None:
+            break
+        product_url = _extract_url(item) or f"{PRODUCT_BASE}{pcode}"
+        return RawCrawledPrice(
+            site="danawa", category=category,
+            product_name=name, price_text=price_text,
+            brand=brand, url=product_url, crawled_at=now,
+        )
+    logger.warning("danawa crawl_single: pcode=%s 미발견", pcode)
+    return None
+
+
 class DanawaCrawler(BaseCrawler):
     def __init__(self, conn: SnowflakeConnection) -> None:
         super().__init__()
@@ -131,7 +218,7 @@ class DanawaCrawler(BaseCrawler):
             cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
                 "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE"
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '다나와'"
             )
             return [
                 {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}

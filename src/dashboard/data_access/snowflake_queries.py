@@ -5,8 +5,8 @@ from snowflake.connector import SnowflakeConnection
 
 
 def get_latest_prices_all(conn: SnowflakeConnection) -> pd.DataFrame:
-    """전체 상품 최신 가격 목록 (대시보드 메인 테이블)."""
-    sql = """
+    """WATCHLIST 활성 상품의 최신 가격 목록 (대시보드 메인 테이블)."""
+    sql = f"""
         SELECT
             p.PRODUCT_ID,
             p.SITE,
@@ -18,6 +18,7 @@ def get_latest_prices_all(conn: SnowflakeConnection) -> pd.DataFrame:
             p.URL
         FROM STAGING.LATEST_PRICES lp
         JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = lp.PRODUCT_ID
+        WHERE {_WATCHLIST_EXISTS}
         ORDER BY p.CATEGORY, lp.PRICE ASC
     """
     cur = conn.cursor()
@@ -55,22 +56,28 @@ def get_summary_stats(conn: SnowflakeConnection) -> dict:
 
 
 def get_product_stats(conn: SnowflakeConnection) -> pd.DataFrame:
-    """상품별 전체 기간 통계."""
-    sql = """
+    """WATCHLIST 활성 상품의 전체 기간 통계.
+
+    ANALYTICS.PRODUCT_STATS에 아직 집계되지 않은 신규 상품도 포함하기 위해
+    STAGING.PRODUCTS를 기준으로 LEFT JOIN한다.
+    """
+    sql = f"""
         SELECT
-            ps.PRODUCT_ID,
+            p.PRODUCT_ID,
             p.SITE,
             p.CATEGORY,
             p.PRODUCT_NAME,
             p.URL,
-            ps.AVG_PRICE,
-            ps.MIN_PRICE_EVER,
-            ps.MAX_PRICE_EVER,
+            COALESCE(ps.AVG_PRICE,      lp.PRICE) AS AVG_PRICE,
+            COALESCE(ps.MIN_PRICE_EVER, lp.PRICE) AS MIN_PRICE_EVER,
+            COALESCE(ps.MAX_PRICE_EVER, lp.PRICE) AS MAX_PRICE_EVER,
             ps.FIRST_CRAWLED_AT,
             ps.LAST_CRAWLED_AT,
-            ps.TOTAL_RECORDS
-        FROM ANALYTICS.PRODUCT_STATS ps
-        JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = ps.PRODUCT_ID
+            COALESCE(ps.TOTAL_RECORDS, 1)         AS TOTAL_RECORDS
+        FROM STAGING.PRODUCTS p
+        LEFT JOIN ANALYTICS.PRODUCT_STATS ps ON ps.PRODUCT_ID = p.PRODUCT_ID
+        LEFT JOIN STAGING.LATEST_PRICES   lp ON lp.PRODUCT_ID = p.PRODUCT_ID
+        WHERE {_WATCHLIST_EXISTS}
         ORDER BY p.CATEGORY, p.PRODUCT_NAME
     """
     cur = conn.cursor()
@@ -134,13 +141,25 @@ def get_price_trend(
         cur.close()
 
 
+_WATCHLIST_EXISTS = """EXISTS (
+            SELECT 1 FROM STAGING.WATCHLIST w
+            WHERE w.IS_ACTIVE = TRUE
+              AND p.SITE = w.SITE
+              AND (
+                  (w.SITE = '다나와' AND p.URL ILIKE '%pcode='     || w.PCODE || '%')
+               OR (w.SITE = '컴퓨존' AND p.URL ILIKE '%ProductNo=' || w.PCODE || '%')
+               OR (w.SITE = '견적왕' AND p.URL ILIKE '%pd_no='    || w.PCODE || '%')
+              )
+        )"""
+
+
 def get_today_crawl_comparison(
     conn: SnowflakeConnection,
     category: str | None = None,
     search: str | None = None,
 ) -> pd.DataFrame:
-    """오늘 크롤링 4회(1~4차) 가격 비교."""
-    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()"]
+    """오늘 크롤링 4회(1~4차) 가격 비교 — WATCHLIST 활성 상품만."""
+    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()", _WATCHLIST_EXISTS]
     params: list = []
 
     if category and category != "ALL":
@@ -249,16 +268,11 @@ def get_watchlist_product_ids(conn: SnowflakeConnection) -> set[int]:
         SELECT DISTINCT p.PRODUCT_ID
         FROM STAGING.WATCHLIST w
         JOIN STAGING.PRODUCTS p
-          ON p.SITE = CASE w.SITE
-              WHEN 'danawa'    THEN '다나와'
-              WHEN 'compuzone' THEN '컴퓨존'
-              WHEN 'kjwwang'   THEN '견적왕'
-              ELSE w.SITE
-            END
+          ON p.SITE = w.SITE
           AND (
-              (w.SITE = 'danawa'    AND p.URL ILIKE '%pcode='     || w.PCODE || '%')
-           OR (w.SITE = 'compuzone' AND p.URL ILIKE '%ProductNo=' || w.PCODE || '%')
-           OR (w.SITE = 'kjwwang'   AND p.URL ILIKE '%pd_no='    || w.PCODE || '%')
+              (w.SITE = '다나와' AND p.URL ILIKE '%pcode='     || w.PCODE || '%')
+           OR (w.SITE = '컴퓨존' AND p.URL ILIKE '%ProductNo=' || w.PCODE || '%')
+           OR (w.SITE = '견적왕' AND p.URL ILIKE '%pd_no='    || w.PCODE || '%')
           )
         WHERE w.IS_ACTIVE = TRUE
     """
@@ -272,13 +286,26 @@ def get_watchlist_product_ids(conn: SnowflakeConnection) -> set[int]:
 
 
 def get_watch_products(conn: SnowflakeConnection, site: str | None = None) -> pd.DataFrame:
-    """사용자 크롤링 대상 제품 목록 조회. site 지정 시 해당 사이트만 반환."""
-    site_filter = "AND SITE = %s" if site else ""
+    """크롤링 대상 제품 목록 조회 (활성/비활성 모두). site 지정 시 해당 사이트만 반환."""
+    site_filter = "AND w.SITE = %s" if site else ""
     sql = f"""
-        SELECT ID, SITE, QUERY, PCODE, PRODUCT_NAME, CATEGORY, BRAND, ADDED_AT
-        FROM STAGING.WATCHLIST
-        WHERE IS_ACTIVE = TRUE {site_filter}
-        ORDER BY ADDED_AT DESC
+        SELECT
+            w.ID, w.SITE, w.QUERY, w.PCODE, w.PRODUCT_NAME, w.CATEGORY, w.BRAND,
+            w.ADDED_AT, w.IS_ACTIVE,
+            lp.PRICE,
+            lp.CRAWLED_AT AS LAST_CRAWLED_AT
+        FROM STAGING.WATCHLIST w
+        LEFT JOIN STAGING.PRODUCTS p
+          ON p.SITE = w.SITE
+          AND (
+              (w.SITE = '다나와' AND p.URL ILIKE '%%pcode='     || w.PCODE || '%%')
+           OR (w.SITE = '컴퓨존' AND p.URL ILIKE '%%ProductNo=' || w.PCODE || '%%')
+           OR (w.SITE = '견적왕' AND p.URL ILIKE '%%pd_no='    || w.PCODE || '%%')
+          )
+        LEFT JOIN STAGING.LATEST_PRICES lp ON lp.PRODUCT_ID = p.PRODUCT_ID
+        WHERE 1=1 {site_filter}
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY w.ID ORDER BY lp.CRAWLED_AT DESC NULLS LAST) = 1
+        ORDER BY w.IS_ACTIVE DESC, w.ADDED_AT DESC
     """
     cur = conn.cursor()
     try:
@@ -297,7 +324,7 @@ def add_watch_product(
     product_name: str | None,
     category: str,
     brand: str | None = None,
-    site: str = "danawa",
+    site: str = "다나와",
 ) -> None:
     """크롤링 대상 제품 추가. (site, pcode) 중복이면 IS_ACTIVE=TRUE로 복원."""
     cur = conn.cursor()

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff --cached --quiet || echo '[/ship 알림] staged 변경사항이 있습니다. 작업이 완료됐다면 /ship 을 사용하세요.'"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "harness@harness-marketplace": true
+  }
+}

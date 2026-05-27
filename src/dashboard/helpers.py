@@ -4,6 +4,7 @@ import logging
 import os
 
 import dash_bootstrap_components as dbc
+import pandas as pd
 import plotly.graph_objects as go
 import requests as _requests
 from dash import html
@@ -109,17 +110,22 @@ def make_price_table(df, max_rows=None):
     return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
 
 
-_SITE_LABEL = {"danawa": "다나와", "kjwwang": "견적왕", "compuzone": "컴퓨존"}
+def _price_str(val) -> str:
+    """가격 값 → '1,234,000원' 또는 '-'. None/NaN/변환불가 모두 방어."""
+    try:
+        return f"{int(float(val)):,}원" if val is not None and not pd.isna(val) else "-"
+    except (TypeError, ValueError):
+        return "-"
 
 
-def send_slack_watch_change(action: str, product_info: dict, watch_list_df, site: str = "danawa") -> None:
+def send_slack_watch_change(action: str, product_info: dict, watch_list_df: pd.DataFrame, site: str = "다나와") -> None:
     """Watch list 추가/삭제 시 Slack Incoming Webhook으로 알림 전송.
 
     Args:
         action: "추가" 또는 "삭제"
         product_info: {"product_name", "pcode"/"product_no"/"pd_no", "category"} 키를 가진 dict
         watch_list_df: 변경 후 전체 사이트 통합 watch list DataFrame
-        site: 변경이 발생한 사이트 ("danawa" | "kjwwang" | "compuzone")
+        site: 변경이 발생한 사이트 ("다나와" | "견적왕" | "컴퓨존")
     """
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook_url:
@@ -129,14 +135,18 @@ def send_slack_watch_change(action: str, product_info: dict, watch_list_df, site
     pcode = product_info.get("pcode") or product_info.get("product_no") or product_info.get("pd_no", "")
     category = product_info.get("category", "")
     action_icon = "➕" if action == "추가" else "➖"
-    site_label = _SITE_LABEL.get(site, site)
+    site_label = site
+
+    # Slack 알림은 활성 크롤링 대상만 표시
+    if "is_active" in watch_list_df.columns:
+        watch_list_df = watch_list_df[watch_list_df["is_active"] == True]  # noqa: E712
 
     if watch_list_df.empty:
         list_text = "  (없음)"
     else:
         lines = []
-        for site_key, site_name in _SITE_LABEL.items():
-            site_rows = watch_list_df[watch_list_df["site"] == site_key]
+        for site_name in ("다나와", "컴퓨존", "견적왕"):
+            site_rows = watch_list_df[watch_list_df["site"] == site_name]
             if site_rows.empty:
                 continue
             lines.append(f"  *{site_name}*")
@@ -171,15 +181,70 @@ def make_stats_table(df):
 
     body_rows = []
     for _, row in df.iterrows():
+        total = row["total_records"]
+        total_str = str(int(total)) if (total is not None and not pd.isna(total)) else "-"
         body_rows.append(html.Tr([
             html.Td(row["category"]),
             html.Td(row["site"]),
             html.Td(_name_cell(row)),
-            html.Td(f"{int(float(row['avg_price'])):,}원"),
-            html.Td(f"{int(row['min_price_ever']):,}원"),
-            html.Td(f"{int(row['max_price_ever']):,}원"),
-            html.Td(str(row["total_records"])),
+            html.Td(_price_str(row["avg_price"])),
+            html.Td(_price_str(row["min_price_ever"])),
+            html.Td(_price_str(row["max_price_ever"])),
+            html.Td(total_str),
         ]))
 
     body = html.Tbody(body_rows)
     return dbc.Table([header, body], bordered=True, hover=True, striped=True, color="dark")
+
+
+def make_watchlist_table(df: pd.DataFrame, del_btn_type: str):
+    """Watchlist DataFrame → dbc.Table (활성/비활성 모두 표시).
+
+    활성(IS_ACTIVE=True): 초록 점 + 현재 가격 + 마지막 크롤링 시간
+    비활성(IS_ACTIVE=False): 회색 점 + 마지막 가격 + 마지막 크롤링 시간 (삭제 버튼 없음)
+    """
+    if df.empty:
+        return html.P("크롤링 대상이 없습니다.", className="text-muted")
+
+    rows = []
+    for _, row in df.iterrows():
+        watch_id = str(int(row["id"]))
+        is_active = bool(row.get("is_active", True))
+
+        _pname = row.get("product_name")
+        display_name = str(_pname if (_pname and not pd.isna(_pname)) else row["query"])[:80]
+
+        status = html.Span(
+            "●",
+            style={"color": "#2ecc71" if is_active else "#6c757d", "fontSize": "10px"},
+            title="크롤링 중" if is_active else "크롤링 중지",
+        )
+
+        price_str = _price_str(row.get("price"))
+
+        last_crawled = row.get("last_crawled_at")
+        lc_str = str(last_crawled)[:16] if (last_crawled is not None and not pd.isna(last_crawled)) else "-"
+
+        muted = {"color": "#888"} if not is_active else {}
+
+        action_cell = (
+            dbc.Button("삭제", id={"type": del_btn_type, "index": watch_id}, color="danger", size="sm")
+            if is_active
+            else html.Span("-", style={"color": "#555"})
+        )
+
+        rows.append(html.Tr([
+            html.Td(status),
+            html.Td(row["category"], style=muted),
+            html.Td(row.get("brand") or "-", style=muted),
+            html.Td(display_name, style=muted),
+            html.Td(price_str, style=muted),
+            html.Td(lc_str, style={"fontSize": "11px", "color": "#aaa"}),
+            html.Td(action_cell),
+        ]))
+
+    header = html.Thead(html.Tr([
+        html.Th(""), html.Th("카테고리"), html.Th("브랜드"), html.Th("상품명"),
+        html.Th("최근 가격"), html.Th("마지막 크롤링"), html.Th(""),
+    ]))
+    return dbc.Table([header, html.Tbody(rows)], bordered=True, hover=True, striped=True, color="dark")

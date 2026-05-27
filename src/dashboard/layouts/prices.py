@@ -36,6 +36,27 @@ def prices_page():
             ]),
             dbc.Tab(label="상품 통계", tab_id="tab-stats", children=[
                 html.Div(className="mt-3", children=[
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.ButtonGroup([
+                                dbc.Button("전체", id="stats-cat-btn-ALL", color="primary", outline=False, size="sm"),
+                                dbc.Button("CPU",  id="stats-cat-btn-CPU", color="primary", outline=True,  size="sm"),
+                                dbc.Button("GPU",  id="stats-cat-btn-GPU", color="primary", outline=True,  size="sm"),
+                                dbc.Button("RAM",  id="stats-cat-btn-RAM", color="primary", outline=True,  size="sm"),
+                                dbc.Button("SSD",  id="stats-cat-btn-SSD", color="primary", outline=True,  size="sm"),
+                            ]),
+                            dcc.Store(id="stats-category-filter", data="ALL"),
+                        ], width="auto", className="me-3"),
+                        dbc.Col([
+                            dbc.ButtonGroup([
+                                dbc.Button("전체",   id="stats-site-btn-ALL",   color="info", outline=False, size="sm"),
+                                dbc.Button("다나와", id="stats-site-btn-다나와", color="info", outline=True,  size="sm"),
+                                dbc.Button("컴퓨존", id="stats-site-btn-컴퓨존", color="info", outline=True,  size="sm"),
+                                dbc.Button("견적왕", id="stats-site-btn-견적왕", color="info", outline=True,  size="sm"),
+                            ]),
+                            dcc.Store(id="stats-site-filter", data="ALL"),
+                        ], width="auto"),
+                    ], className="mb-3 align-items-center"),
                     dcc.Loading(type="circle", children=html.Div(id="product-stats-table")),
                 ]),
             ]),
