@@ -168,6 +168,53 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
     return results
 
 
+def crawl_single(
+    query: str, product_no: str, category: str, brand: str | None = None
+) -> RawCrawledPrice | None:
+    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
+    medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(category.upper(), "")
+    session = requests.Session()
+
+    for page in range(1, MAX_SEARCH_PAGES + 1):
+        params = _build_search_params(query, page)
+        if medium_div_no:
+            params["MediumDivNo"] = medium_div_no
+        try:
+            resp = session.get(SEARCH_URL, params=params, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = "euc-kr"
+        except requests.RequestException as e:
+            logger.error("compuzone crawl_single 실패: %s", e)
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("li.li-obj")
+        if not items:
+            break
+
+        now = datetime.now(timezone.utc)
+        for item in items:
+            pno = item.get("id", "").replace("li-pno-", "")
+            if pno != product_no:
+                continue
+            name_tag = item.select_one("a.prd_info_name")
+            price_div = item.select_one("div.prd_price")
+            if not name_tag or not price_div:
+                continue
+            raw_price = price_div.get("data-price")
+            if not raw_price:
+                continue
+            product_url = f"{DETAIL_BASE}?ProductNo={pno}&BigDivNo=4&MediumDivNo={medium_div_no}"
+            return RawCrawledPrice(
+                site="compuzone", category=category,
+                product_name=name_tag.get_text(strip=True),
+                price_text=raw_price,
+                brand=brand, url=product_url, crawled_at=now,
+            )
+    logger.warning("compuzone crawl_single: product_no=%s 미발견", product_no)
+    return None
+
+
 class CompuzoneCrawler(BaseCrawler):
     def __init__(self, conn: SnowflakeConnection) -> None:
         super().__init__()

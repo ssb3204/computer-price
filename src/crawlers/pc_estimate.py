@@ -110,6 +110,56 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
     return results
 
 
+def crawl_single(
+    query: str, pd_no: str, category: str, brand: str | None = None
+) -> RawCrawledPrice | None:
+    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
+    cate2 = CATEGORY_TO_CATE2.get(category.upper())
+    if cate2 is None:
+        logger.warning("지원하지 않는 카테고리: %s", category)
+        return None
+
+    session = requests.Session()
+    for page in range(1, MAX_SEARCH_PAGES + 1):
+        form_data = {
+            "depth": "2", "cate1": "2", "cate2": cate2,
+            "search_word": query, "page": str(page), "view_type": "list",
+        }
+        try:
+            resp = session.post(LIST_URL, data=form_data, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = "euc-kr"
+        except requests.RequestException as e:
+            logger.error("kjwwang crawl_single 실패: %s", e)
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("li.list")
+        if not items:
+            break
+
+        now = datetime.now(timezone.utc)
+        for item in items:
+            name_tag = item.select_one("a.name")
+            if not name_tag:
+                continue
+            href = name_tag.get("href", "")
+            if _extract_pd_no(href) != pd_no:
+                continue
+            price_tag = item.select_one("span.card")
+            if not price_tag:
+                break
+            product_url = f"{DETAIL_BASE}{href}" if href.startswith("/") else ""
+            return RawCrawledPrice(
+                site="kjwwang", category=category,
+                product_name=name_tag.get_text(separator=" ", strip=True),
+                price_text=price_tag.get_text(strip=True),
+                brand=brand, url=product_url, crawled_at=now,
+            )
+    logger.warning("kjwwang crawl_single: pd_no=%s 미발견", pd_no)
+    return None
+
+
 class PCEstimateCrawler(BaseCrawler):
     def __init__(self, conn: SnowflakeConnection) -> None:
         super().__init__()

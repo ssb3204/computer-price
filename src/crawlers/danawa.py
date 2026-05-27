@@ -166,6 +166,42 @@ def search_products(query: str, max_results: int = 10, category: str | None = No
     return results
 
 
+def crawl_single(
+    query: str, pcode: str, category: str, brand: str | None = None
+) -> RawCrawledPrice | None:
+    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    url = f"{SEARCH_URL}?query={query}&tab=goods"
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+    except requests.RequestException as e:
+        logger.error("danawa crawl_single 실패: %s", e)
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    now = datetime.now(timezone.utc)
+    for item in soup.select("li.prod_item"):
+        if not _is_real_product(item):
+            continue
+        if _extract_pcode(item) != pcode:
+            continue
+        name = _extract_name(item)
+        price_text = _extract_price_text(item)
+        if name is None or price_text is None:
+            break
+        product_url = _extract_url(item) or f"{PRODUCT_BASE}{pcode}"
+        return RawCrawledPrice(
+            site="danawa", category=category,
+            product_name=name, price_text=price_text,
+            brand=brand, url=product_url, crawled_at=now,
+        )
+    logger.warning("danawa crawl_single: pcode=%s 미발견", pcode)
+    return None
+
+
 class DanawaCrawler(BaseCrawler):
     def __init__(self, conn: SnowflakeConnection) -> None:
         super().__init__()
@@ -182,7 +218,7 @@ class DanawaCrawler(BaseCrawler):
             cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
                 "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE"
+                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = 'danawa'"
             )
             return [
                 {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}

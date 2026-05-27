@@ -13,6 +13,7 @@ from dash.dependencies import ALL, Input, Output, State
 
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
+from src.pipeline.crawl import crawl_and_load_single
 from src.crawlers.compuzone import enrich_names_from_detail as compuzone_enrich
 from src.crawlers.compuzone import search_products as compuzone_search
 from src.crawlers.danawa import enrich_names_from_detail as danawa_enrich
@@ -90,6 +91,19 @@ def _register_button_toggle(app, store_id, btn_prefix, items, default=None):
 
 def register_callbacks(app, cache):
     """app 에 모든 콜백을 등록한다."""
+
+    # ── 즉시 크롤링 헬퍼 ──
+
+    def _trigger_single_crawl(cache, site, query, pcode, category, brand):
+        """백그라운드 스레드로 단일 상품 크롤링 후 캐시 무효화."""
+        settings = SnowflakeSettings()
+
+        def _run():
+            success = crawl_and_load_single(settings, site, query, pcode, category, brand)
+            if success:
+                cache.clear()
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── 캐시 래퍼 (TTL 1800초=30분, watchlist CRUD 제외) ──
     @cache.memoize(timeout=1800)
@@ -621,6 +635,11 @@ def register_callbacks(app, cache):
                     )
                     df_after = get_watch_products(conn)
                     send_slack_watch_change("추가", product, df_after, site="danawa")
+                    _trigger_single_crawl(
+                        cache, "danawa",
+                        product["product_name"], product["pcode"],
+                        category or "기타", None,
+                    )
         except Exception:
             logger.exception("watchlist 추가 실패")
 
@@ -835,6 +854,11 @@ def register_callbacks(app, cache):
                     )
                     df_after = get_watch_products(conn)
                     send_slack_watch_change("추가", product, df_after, site="kjwwang")
+                    _trigger_single_crawl(
+                        cache, "kjwwang",
+                        product["product_name"], product["pd_no"],
+                        category or "기타", None,
+                    )
         except Exception:
             logger.exception("pcest watchlist 추가 실패")
 
@@ -962,6 +986,11 @@ def register_callbacks(app, cache):
                     )
                     df_after = get_watch_products(conn)
                     send_slack_watch_change("추가", product, df_after, site="compuzone")
+                    _trigger_single_crawl(
+                        cache, "compuzone",
+                        product["product_name"], product["product_no"],
+                        category or "기타", None,
+                    )
         except Exception:
             logger.exception("compuzone watchlist 추가 실패")
 
