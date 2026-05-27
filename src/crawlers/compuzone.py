@@ -174,7 +174,48 @@ def crawl_single(
     """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
     medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(category.upper(), "")
     session = requests.Session()
+    now = datetime.now(timezone.utc)
 
+    # 1차: 카테고리 목록에서 product_no 매칭 (crawl_raw와 동일한 주 경로)
+    if medium_div_no:
+        for page in range(1, MAX_CRAWL_PAGES + 1):
+            try:
+                resp = session.post(
+                    LIST_URL,
+                    data=_build_list_form(medium_div_no, page=page),
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                resp.encoding = "euc-kr"
+            except requests.RequestException as e:
+                logger.error("compuzone crawl_single(list) 실패: %s", e)
+                break
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            items = soup.select("li.li-obj")
+            if not items:
+                break
+
+            for item in items:
+                pno = item.get("id", "").replace("li-pno-", "")
+                if pno != product_no:
+                    continue
+                name_tag = item.select_one("a.prd_info_name")
+                price_div = item.select_one("div.prd_price")
+                if not name_tag or not price_div:
+                    break
+                raw_price = price_div.get("data-price")
+                if not raw_price:
+                    break
+                product_url = f"{DETAIL_BASE}?ProductNo={pno}&BigDivNo=4&MediumDivNo={medium_div_no}"
+                return RawCrawledPrice(
+                    site="compuzone", category=category,
+                    product_name=name_tag.get_text(strip=True),
+                    price_text=raw_price,
+                    brand=brand, url=product_url, crawled_at=now,
+                )
+
+    # 2차: 키워드 검색 fallback
     for page in range(1, MAX_SEARCH_PAGES + 1):
         params = _build_search_params(query, page)
         if medium_div_no:
@@ -184,7 +225,7 @@ def crawl_single(
             resp.raise_for_status()
             resp.encoding = "euc-kr"
         except requests.RequestException as e:
-            logger.error("compuzone crawl_single 실패: %s", e)
+            logger.error("compuzone crawl_single(search) 실패: %s", e)
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -192,7 +233,6 @@ def crawl_single(
         if not items:
             break
 
-        now = datetime.now(timezone.utc)
         for item in items:
             pno = item.get("id", "").replace("li-pno-", "")
             if pno != product_no:
@@ -211,6 +251,7 @@ def crawl_single(
                 price_text=raw_price,
                 brand=brand, url=product_url, crawled_at=now,
             )
+
     logger.warning("compuzone crawl_single: product_no=%s 미발견", product_no)
     return None
 
