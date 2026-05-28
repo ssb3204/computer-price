@@ -159,7 +159,7 @@ def get_today_crawl_comparison(
     search: str | None = None,
 ) -> pd.DataFrame:
     """오늘 크롤링 4회(1~4차) 가격 비교 — WATCHLIST 활성 상품만."""
-    conditions = ["dp.CRAWLED_AT::DATE = CURRENT_DATE()", _WATCHLIST_EXISTS]
+    conditions = ["dp.CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE", _WATCHLIST_EXISTS]
     params: list = []
 
     if category and category != "ALL":

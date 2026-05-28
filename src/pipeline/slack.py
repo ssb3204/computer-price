@@ -19,8 +19,8 @@ def _sanitize_for_slack(text: str) -> str:
     )
 
 
-def _send_slack_message(text: str) -> None:
-    """Slack 메시지 전송 내부 헬퍼."""
+def send_slack_message(text: str) -> None:
+    """Slack 메시지 전송."""
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
     if not webhook_url:
         logger.info("[Slack] SLACK_WEBHOOK_URL 미설정 — 건너뜀")
@@ -51,5 +51,5 @@ def send_slack_failures(crawl_failures: list[dict]) -> int:
             f"• *{failure['site_name']}* — {failure['failed_at']}\n"
             f"    `{safe_error}`"
         )
-    _send_slack_message("\n".join(lines))
+    send_slack_message("\n".join(lines))
     return len(crawl_failures)

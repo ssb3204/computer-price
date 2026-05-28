@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from src.common.config import SnowflakeSettings
 from src.common.snowflake_client import get_connection
-from src.pipeline.slack import _send_slack_message
+from src.pipeline.slack import send_slack_message
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def check_cross_site_prices(settings: SnowflakeSettings) -> int:
             SELECT p.PRODUCT_NAME, p.SITE, ph.PRICE
             FROM STAGING.PRICE_HISTORY ph
             JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = ph.PRODUCT_ID
-            WHERE ph.CRAWLED_AT::DATE = CURRENT_DATE()
+            WHERE ph.CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE
         """)
         rows = cur.fetchall()
         cur.close()
@@ -70,7 +70,7 @@ def check_cross_site_prices(settings: SnowflakeSettings) -> int:
                 f"• {name[:35]} | {site}: {price:,}원 "
                 f"(최저가 {min_price:,}원 대비 {deviation:.1f}%)"
             )
-        _send_slack_message("\n".join(lines))
+        send_slack_message("\n".join(lines))
         logger.warning("[교차검증] 이상 %d건 감지", len(anomalies))
     else:
         logger.info("[교차검증] 이상 없음")
@@ -114,9 +114,9 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM RAW.CRAWLED_PRICES
-                 WHERE CRAWLED_AT::DATE = CURRENT_DATE()) AS raw_count,
+                 WHERE CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE) AS raw_count,
                 (SELECT COUNT(*) FROM STAGING.PRICE_HISTORY
-                 WHERE CRAWLED_AT::DATE = CURRENT_DATE()) AS staging_count
+                 WHERE CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE) AS staging_count
         """)
         row = cur.fetchone()
         raw_count, staging_count = int(row[0]), int(row[1])
@@ -158,7 +158,7 @@ def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResu
 
     if issues:
         lines = [f"*⚠️ [레이어 정합성] 이슈 {len(issues)}건*"] + [f"• {i}" for i in issues]
-        _send_slack_message("\n".join(lines))
+        send_slack_message("\n".join(lines))
         logger.warning("[레이어 정합성] %s", " | ".join(issues))
     else:
         logger.info(
