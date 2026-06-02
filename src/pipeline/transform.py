@@ -34,12 +34,12 @@ def transform_staging(settings: SnowflakeSettings) -> int:
         # APPEND_ONLY Stream이므로 METADATA$ACTION은 항상 'INSERT'
         cur.execute("""
             CREATE OR REPLACE TEMPORARY TABLE TEMP_STREAM_DATA AS
-            SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, CRAWLED_AT
+            SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, URL, CRAWLED_AT
             FROM CRAWLED_PRICES_STREAM
             WHERE METADATA$ACTION = 'INSERT'
         """)
         cur.execute(
-            "SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, BRAND, URL, "
+            "SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, URL, "
             "CRAWLED_AT FROM TEMP_STREAM_DATA"
         )
         raw_rows = cur.fetchall()
@@ -54,7 +54,7 @@ def transform_staging(settings: SnowflakeSettings) -> int:
         failures = []  # (raw_id, site, category, name, price_text, crawled_at, reason)
         anomaly_count = 0
         for row in raw_rows:
-            raw_id, site, category, product_name, price_text, brand, url, crawled_at = row
+            raw_id, site, category, product_name, price_text, url, crawled_at = row
             price = parse_korean_price(price_text)
             if price is None:
                 failures.append((raw_id, site, category, product_name, price_text, crawled_at, "가격 파싱 실패"))
@@ -72,7 +72,7 @@ def transform_staging(settings: SnowflakeSettings) -> int:
                 failures.append((raw_id, site, category, product_name, price_text, crawled_at, f"알 수 없는 사이트: {site}"))
                 continue
             cleaned_name = re.sub(r"\s+", " ", product_name.strip())
-            parsed.append((raw_id, site_display, category, cleaned_name, brand, url, price, crawled_at))
+            parsed.append((raw_id, site_display, category, cleaned_name, url, price, crawled_at))
 
         if anomaly_count:
             logger.warning("[Staging] 이상치 총 %d건 제외", anomaly_count)
@@ -99,20 +99,20 @@ def transform_staging(settings: SnowflakeSettings) -> int:
             "MERGE INTO PRODUCTS t "
             "USING (SELECT %s AS SITE, %s AS PRODUCT_NAME, %s AS NEW_URL) s "
             "ON t.SITE = s.SITE AND t.PRODUCT_NAME = s.PRODUCT_NAME "
-            "WHEN NOT MATCHED THEN INSERT (SITE, CATEGORY, PRODUCT_NAME, BRAND, URL) "
-            "VALUES (%s, %s, %s, %s, s.NEW_URL) "
+            "WHEN NOT MATCHED THEN INSERT (SITE, CATEGORY, PRODUCT_NAME, URL) "
+            "VALUES (%s, %s, %s, s.NEW_URL) "
             "WHEN MATCHED THEN UPDATE SET "
             "URL = CASE WHEN s.NEW_URL != '' THEN s.NEW_URL ELSE t.URL END, "
             "UPDATED_AT = CURRENT_TIMESTAMP()",
-            [(site_display, name, url or '', site_display, category, name, brand)
-             for _, site_display, category, name, brand, url, _, _ in parsed],
+            [(site_display, name, url or '', site_display, category, name)
+             for _, site_display, category, name, url, _, _ in parsed],
         )
 
         cur.execute("SELECT PRODUCT_ID, SITE, PRODUCT_NAME FROM PRODUCTS")
         product_map = {(row[1], row[2]): row[0] for row in cur.fetchall()}
 
         daily_rows = []
-        for raw_id, site_display, category, name, brand, url, price, crawled_at in parsed:
+        for raw_id, site_display, category, name, url, price, crawled_at in parsed:
             product_id = product_map.get((site_display, name))
             if product_id is None:
                 continue
