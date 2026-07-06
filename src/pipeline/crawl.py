@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 
 import requests
 
-from src.common.config import SnowflakeSettings
+from src.common.config import MySQLSettings
 from src.common.models import RawCrawledPrice
-from src.common.snowflake_client import get_connection
+from src.common.mysql_client import get_connection
 from src.crawlers.compuzone import CompuzoneCrawler
 from src.crawlers.compuzone import crawl_single as compuzone_single
 from src.crawlers.danawa import DanawaCrawler
@@ -18,7 +18,7 @@ from src.crawlers.pc_estimate import crawl_single as pcest_single
 logger = logging.getLogger(__name__)
 
 
-def crawl_all_sites(settings: SnowflakeSettings) -> tuple[list[RawCrawledPrice], list[dict]]:
+def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], list[dict]]:
     """3개 사이트를 순서대로 크롤링. 실패한 사이트는 crawl_failures에 기록."""
     all_raw: list[RawCrawledPrice] = []
     crawl_failures: list[dict] = []
@@ -62,7 +62,7 @@ _SINGLE_CRAWL_FN = {
 
 
 def crawl_and_load_single(
-    settings: SnowflakeSettings,
+    settings: MySQLSettings,
     site: str,
     query: str,
     pcode: str,
@@ -73,6 +73,10 @@ def crawl_and_load_single(
 
     백그라운드 스레드에서 호출. 실패해도 WATCHLIST 추가는 유지되며
     다음 스케줄 크롤링에서 재시도된다.
+
+    NOTE(Phase 3-1): load_raw는 MySQL로 전환됨. transform_staging은 아직
+    Snowflake 기반(Phase 3-2 대상)이라 이 즉시-적재 경로는 3-2 완료 전까지 미완결.
+    스케줄 크롤링(crawl_all_sites→load_raw) 경로는 정상 동작.
     """
     from src.pipeline.load_raw import load_raw
     from src.pipeline.transform import transform_staging

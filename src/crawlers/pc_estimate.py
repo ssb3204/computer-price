@@ -1,6 +1,6 @@
 """Crawler for kjwwang.com (견적왕) — WATCHLIST 기반 크롤링.
 
-크롤링 대상은 Snowflake WATCHLIST 테이블에서 동적으로 로드.
+크롤링 대상은 stg_watchlist 테이블에서 동적으로 로드.
 카테고리(cate2) + 검색어로 POST 검색 후 pd_no로 정확한 상품을 찾아 가격 수집.
 """
 
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import requests
 from bs4 import BeautifulSoup
-from snowflake.connector import SnowflakeConnection
+from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
 from src.crawlers.base import BaseCrawler
@@ -161,7 +161,7 @@ def crawl_single(
 
 
 class PCEstimateCrawler(BaseCrawler):
-    def __init__(self, conn: SnowflakeConnection) -> None:
+    def __init__(self, conn: Connection) -> None:
         super().__init__()
         self._conn = conn
 
@@ -173,10 +173,9 @@ class PCEstimateCrawler(BaseCrawler):
         """WATCHLIST에서 kjwwang 활성 크롤링 대상 로드."""
         cur = self._conn.cursor()
         try:
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
-                "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '견적왕'"
+                "SELECT `query`, `pcode`, `category`, `brand` "
+                "FROM `stg_watchlist` WHERE `is_active` = 1 AND `site` = '견적왕'"
             )
             return [
                 {"query": row[0], "pd_no": row[1], "category": row[2], "brand": row[3]}

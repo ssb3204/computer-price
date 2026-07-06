@@ -1,6 +1,6 @@
 """Crawler for shop.danawa.com — pcode 기반 검색.
 
-크롤링 대상은 Snowflake WATCHLIST 테이블에서 동적으로 로드.
+크롤링 대상은 stg_watchlist 테이블에서 동적으로 로드.
 """
 
 import logging
@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import requests
 
 from bs4 import BeautifulSoup, Tag
-from snowflake.connector import SnowflakeConnection
+from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
 from src.crawlers.base import BaseCrawler, DEFAULT_HEADERS
@@ -203,7 +203,7 @@ def crawl_single(
 
 
 class DanawaCrawler(BaseCrawler):
-    def __init__(self, conn: SnowflakeConnection) -> None:
+    def __init__(self, conn: Connection) -> None:
         super().__init__()
         self._conn = conn
 
@@ -215,10 +215,9 @@ class DanawaCrawler(BaseCrawler):
         """WATCHLIST에서 활성 크롤링 대상 로드."""
         cur = self._conn.cursor()
         try:
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
-                "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '다나와'"
+                "SELECT `query`, `pcode`, `category`, `brand` "
+                "FROM `stg_watchlist` WHERE `is_active` = 1 AND `site` = '다나와'"
             )
             return [
                 {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}
