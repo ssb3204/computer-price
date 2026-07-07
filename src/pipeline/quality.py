@@ -4,8 +4,8 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-from src.common.config import SnowflakeSettings
-from src.common.snowflake_client import get_connection
+from src.common.config import MySQLSettings
+from src.common.mysql_client import get_connection
 from src.pipeline.slack import send_slack_message
 
 logger = logging.getLogger(__name__)
@@ -44,19 +44,18 @@ def _find_cross_site_anomalies(
     return anomalies
 
 
-def check_cross_site_prices(settings: SnowflakeSettings) -> int:
+def check_cross_site_prices(settings: MySQLSettings) -> int:
     """교차 검증: 동일 제품이 여러 사이트에 존재할 때 오늘 가격 편차 확인.
 
     이상치 발견 시 Slack WARNING을 보내지만 파이프라인은 계속 진행한다.
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
-        cur.execute("USE DATABASE COMPUTER_PRICE")
         cur.execute("""
-            SELECT p.PRODUCT_NAME, p.SITE, ph.PRICE
-            FROM STAGING.PRICE_HISTORY ph
-            JOIN STAGING.PRODUCTS p ON p.PRODUCT_ID = ph.PRODUCT_ID
-            WHERE ph.CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE
+            SELECT p.`product_name`, p.`site`, ph.`price`
+            FROM `stg_price_history` ph
+            JOIN `stg_products` p ON p.`product_id` = ph.`product_id`
+            WHERE DATE(ph.`crawled_at`) = UTC_DATE()
         """)
         rows = cur.fetchall()
         cur.close()
@@ -97,42 +96,41 @@ class LayerConsistencyResult:
         return issues
 
 
-def check_layer_consistency(settings: SnowflakeSettings) -> LayerConsistencyResult:
+def check_layer_consistency(settings: MySQLSettings) -> LayerConsistencyResult:
     """레이어 정합성 체크: Raw→Staging 손실률, Analytics 누락 상품.
 
     임계값 초과 시 Slack WARNING을 보내지만 파이프라인은 계속 진행한다.
 
     체크 항목:
         1. Raw → Staging 손실률 > 10%: 파싱/이상치 제외로 과도한 드롭 발생
-        2. ANALYTICS.PRODUCT_STATS 누락: analytics 스텝 미실행 또는 버그
+        2. ans_product_stats 누락: analytics 스텝 미실행 또는 버그
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
-        cur.execute("USE DATABASE COMPUTER_PRICE")
 
         # 1. 오늘 Raw vs Staging 건수
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM RAW.CRAWLED_PRICES
-                 WHERE CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE) AS raw_count,
-                (SELECT COUNT(*) FROM STAGING.PRICE_HISTORY
-                 WHERE CRAWLED_AT::DATE = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE) AS staging_count
+                (SELECT COUNT(*) FROM `raw_crawled_prices`
+                 WHERE DATE(`crawled_at`) = UTC_DATE()) AS raw_count,
+                (SELECT COUNT(*) FROM `stg_price_history`
+                 WHERE DATE(`crawled_at`) = UTC_DATE()) AS staging_count
         """)
         row = cur.fetchone()
         raw_count, staging_count = int(row[0]), int(row[1])
 
-        # 2. Analytics 미집계 상품 (PRICE_HISTORY는 있지만 PRODUCT_STATS에 없는 상품)
-        # PRICE_HISTORY 없는 신규 미크롤링 상품은 정상이므로 제외
+        # 2. Analytics 미집계 상품 (price_history는 있지만 product_stats에 없는 상품)
+        # price_history 없는 신규 미크롤링 상품은 정상이므로 제외
         cur.execute("""
             SELECT COUNT(*)
-            FROM STAGING.PRODUCTS p
+            FROM `stg_products` p
             WHERE EXISTS (
-                SELECT 1 FROM STAGING.PRICE_HISTORY ph
-                WHERE ph.PRODUCT_ID = p.PRODUCT_ID
+                SELECT 1 FROM `stg_price_history` ph
+                WHERE ph.`product_id` = p.`product_id`
             )
             AND NOT EXISTS (
-                SELECT 1 FROM ANALYTICS.PRODUCT_STATS ps
-                WHERE ps.PRODUCT_ID = p.PRODUCT_ID
+                SELECT 1 FROM `ans_product_stats` ps
+                WHERE ps.`product_id` = p.`product_id`
             )
         """)
         missing_analytics = int(cur.fetchone()[0])
