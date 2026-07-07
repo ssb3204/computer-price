@@ -35,7 +35,7 @@ src/crawlers/
 ### 3. RawCrawledPrice DTO
 
 모든 크롤러의 출력은 `src/common/models.py`의 `RawCrawledPrice` frozen dataclass다:
-- 새 필드 추가 전 pipeline-agent에게 알린다 (Snowflake MERGE 키 영향)
+- 새 필드 추가 전 pipeline-agent에게 알린다 (MySQL UNIQUE 키 영향)
 - 가격은 정수(원 단위)로 반환
 
 ### 4. 가격 파싱
@@ -45,7 +45,7 @@ src/crawlers/
 
 ### 5. WATCHLIST 기반 동적 크롤링
 
-크롤링 대상은 코드에 하드코딩하지 않는다. Snowflake WATCHLIST 테이블에서 동적으로 로드한다.
+크롤링 대상은 코드에 하드코딩하지 않는다. MySQL stg_watchlist 테이블에서 동적으로 로드한다.
 
 ## 작업 절차
 

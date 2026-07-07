@@ -12,7 +12,7 @@ model: opus
 
 - 사이트별 HTML 구조 분석 및 파싱 로직 작성
 - 광고/실제 상품 구분 필터링
-- Snowflake WATCHLIST 기반 동적 크롤링 대상 처리
+- MySQL stg_watchlist 기반 동적 크롤링 대상 처리
 - RawCrawledPrice DTO(frozen dataclass)로 데이터 정규화
 
 ## 작업 원칙

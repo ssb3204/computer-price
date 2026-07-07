@@ -5,7 +5,7 @@ description: "통합 테스트 및 데이터 정합성 검증 스킬. pytest 실
 
 # QA 통합 검증 스킬
 
-크롤러 → Snowflake → 대시보드 전 레이어의 통합 테스트와 데이터 정합성 검증 지침.
+크롤러 → MySQL → 대시보드 전 레이어의 통합 테스트와 데이터 정합성 검증 지침.
 
 ## 검증 원칙
 
@@ -27,22 +27,21 @@ python -m pytest tests/ -v -o "addopts="
 
 **Raw → Staging 손실률:**
 ```sql
--- 손실률 확인 (5% 초과 시 이상)
+-- 손실률 확인 (10% 초과 시 이상, src/pipeline/quality.py 임계값과 동일)
 SELECT
-    COUNT(*) AS raw_count,
-    (SELECT COUNT(*) FROM STAGING.PRICE_HISTORY
-     WHERE DATE(CREATED_AT) = CURRENT_DATE) AS staging_count
-FROM RAW.CRAWLED_PRICES
-WHERE DATE(CRAWLED_AT) = CURRENT_DATE;
+    (SELECT COUNT(*) FROM raw_crawled_prices
+     WHERE DATE(crawled_at) = UTC_DATE()) AS raw_count,
+    (SELECT COUNT(*) FROM stg_price_history
+     WHERE DATE(crawled_at) = UTC_DATE()) AS staging_count;
 ```
 
 **Analytics 누락 탐지:**
 ```sql
--- Staging에는 있지만 Analytics에 없는 레코드
+-- price_history는 있지만 ans_product_stats에 집계되지 않은 상품
 SELECT COUNT(*) AS missing_count
-FROM STAGING.LATEST_PRICES lp
-LEFT JOIN ANALYTICS.PRODUCT_PRICES ap ON lp.PRODUCT_ID = ap.PRODUCT_ID
-WHERE ap.PRODUCT_ID IS NULL;
+FROM stg_products p
+WHERE EXISTS (SELECT 1 FROM stg_price_history ph WHERE ph.product_id = p.product_id)
+  AND NOT EXISTS (SELECT 1 FROM ans_product_stats ps WHERE ps.product_id = p.product_id);
 ```
 
 ### Level 3: 파이프라인 실행 이력 확인
@@ -67,7 +66,7 @@ ORDER BY START_TIME;
 | 항목 | 기준 | 확인 방법 |
 |------|------|---------|
 | pytest | 100% 통과 | `pytest tests/ -v` |
-| Raw→Staging 손실률 | < 5% | Level 2 SQL |
+| Raw→Staging 손실률 | < 10% | Level 2 SQL |
 | Analytics 누락 | 0건 | Level 2 SQL |
 | 파이프라인 이력 | RECORD_COUNT > 0 | Level 3 SQL |
 | 가격 범위 | 0 < price < 10M | Level 4 확인 |

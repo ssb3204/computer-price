@@ -1,6 +1,6 @@
 ---
 name: explore-project
-description: "프로젝트 전체 구조·코드·Snowflake 스키마·데이터 흐름·설계 결정을 세밀하게 탐색하여 project-deep-dive.md를 생성하는 스킬. 프로젝트 파악, 코드 분석, 구조 설명, 면접 준비, 프로젝트 정리 요청 시 반드시 이 스킬을 사용. 후속 작업(특정 모듈만 다시, 스키마 업데이트, 내용 보완)에도 반드시 이 스킬을 사용."
+description: "프로젝트 전체 구조·코드·MySQL 스키마·데이터 흐름·설계 결정을 세밀하게 탐색하여 project-deep-dive.md를 생성하는 스킬. 프로젝트 파악, 코드 분석, 구조 설명, 면접 준비, 프로젝트 정리 요청 시 반드시 이 스킬을 사용. 후속 작업(특정 모듈만 다시, 스키마 업데이트, 내용 보완)에도 반드시 이 스킬을 사용."
 ---
 
 # 프로젝트 심층 탐색 스킬
@@ -12,7 +12,7 @@ description: "프로젝트 전체 구조·코드·Snowflake 스키마·데이터
 추측 없이 실제 파일을 읽는 순서를 따른다:
 
 1. **루트 구조 파악** — `CLAUDE.md`, `docker-compose.yml`, `requirements*.txt` 읽기
-2. **공통 모델/설정** — `src/common/` 전체 (models.py, config.py, snowflake_client.py)
+2. **공통 모델/설정** — `src/common/` 전체 (models.py, config.py, mysql_client.py)
 3. **크롤러** — `src/crawlers/` 전체 (base.py → 각 사이트 크롤러 → parser_utils.py)
 4. **파이프라인** — `src/pipeline/` 전체 (crawl → load_raw → transform → quality → detect → slack → observability)
 5. **Airflow DAG** — `src/airflow_dags/` (DAG 구조, 태스크 의존성)
@@ -36,7 +36,7 @@ description: "프로젝트 전체 구조·코드·Snowflake 스키마·데이터
 - 크롤러 실행부터 대시보드 표시까지 단계별 추적
 - 각 단계의 입력/출력 데이터 형태 명시
 
-### 5. Snowflake 스키마
+### 5. MySQL 스키마
 코드에서 직접 추출한 테이블별 스키마:
 ```
 테이블명 (레이어)
@@ -59,7 +59,7 @@ description: "프로젝트 전체 구조·코드·Snowflake 스키마·데이터
 
 설계 결정 예시 (코드에서 확인 후 작성):
 - MERGE 멱등성 전략
-- Snowflake Stream 사용 이유
+- 미처리 조인 방식(증분 처리) 채택 이유
 - frozen dataclass DTO
 - LAG() 윈도우 함수 변경 감지
 - Airflow 스케줄링 방식
