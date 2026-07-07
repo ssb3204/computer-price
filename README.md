@@ -9,14 +9,14 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
     │
     └── run_pipeline.py
            ├── Step 1: 크롤링 (다나와, 컴퓨존, 견적왕)
-           ├── Step 2: Snowflake Raw 적재
+           ├── Step 2: MySQL Raw 적재
            ├── Step 3: Staging 변환 (정규화, 가격 파싱, 이상치 제거)
            ├── Step 3.5: 품질 검증 (레이어 정합성, 사이트 간 가격 편차)
            ├── Step 4: 변경 감지 & 알림 (NEW_LOW, PRICE_DROP 등)
            ├── Step 5: Slack 실패 알림
            └── Step 6: Analytics 집계 (일별/주별 요약)
                            │
-                     Dashboard ← Snowflake
+                     Dashboard ← MySQL
 ```
 
 ## 크롤링 대상
@@ -33,7 +33,7 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
 |--------|------|
 | 크롤링 | Python, BeautifulSoup |
 | 오케스트레이션 | GitHub Actions (하루 4회) |
-| DWH | Snowflake (3-Layer: Raw → Staging → Analytics) |
+| DWH | MySQL 8.0 로컬 (단일 DB `computer_price`, 3-Layer: 테이블 접두사 raw_/stg_/ans_) |
 | 시각화 | Dash (Plotly) |
 | 인프라 | Docker Compose (대시보드 단일 서비스) |
 
@@ -42,7 +42,7 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
 ### 사전 요구사항
 
 - Docker Desktop
-- Snowflake 계정 (환경변수 설정 필요)
+- MySQL 8.0 (로컬 설치, `price_app` 전용 계정 — root 계정은 사용하지 않음)
 
 ### 설정
 
@@ -51,7 +51,7 @@ git clone https://github.com/ssb3204/computer-price.git
 cd computer-price
 
 cp .env.example .env
-# .env 파일에 Snowflake 연결 정보 입력
+# .env 파일에 MySQL 연결 정보 입력 (MYSQL_PASSWORD 등)
 ```
 
 ### 실행
@@ -75,37 +75,38 @@ python run_pipeline.py
 ```
 computer_price/
 ├── src/
-│   ├── common/          # 공유 모듈 (models, config, snowflake_client)
+│   ├── common/          # 공유 모듈 (models, config, mysql_client)
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
 │   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
 │   └── dashboard/       # Dash 웹 대시보드
 │       ├── layouts/     # 페이지별 레이아웃 (5개 페이지)
-│       └── data_access/ # Snowflake 쿼리
-├── snowflake/           # Snowflake DDL (3-Layer)
+│       └── data_access/ # MySQL 쿼리
+├── mysql/               # MySQL DDL (3-Layer)
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
-│   └── integration/     # Snowflake 통합 테스트
+│   └── integration/     # 로컬 MySQL 통합 테스트
 ├── .github/workflows/   # CI (유닛+통합 테스트), 크롤링 스케줄
 ├── run_pipeline.py      # 파이프라인 진입점 (6단계 + 품질 검증)
 └── docker-compose.yml
 ```
 
-## 데이터 모델 (Snowflake 3-Layer)
+## 데이터 모델 (MySQL 3-Layer, 테이블 접두사 기반)
 
-### Raw — 크롤링 원본
-- **CRAWLED_PRICES** — 가공 없는 원본 데이터 (가격 텍스트 보존)
+### Raw (`raw_`) — 크롤링 원본
+- **raw_crawled_prices** — 가공 없는 원본 데이터 (가격 텍스트 보존)
+- **raw_transform_failures** — Staging 변환 실패 감사 로그
 
-### Staging — 정제/정규화
-- **PRODUCTS** — 사이트별 상품 목록 (URL 최신값으로 유지)
-- **PRICE_HISTORY** — 일별 가격 이력 (append-only)
-- **LATEST_PRICES** — 상품별 최신 가격 **(VIEW, PRICE_HISTORY에서 동적 도출)**
-- **PRICE_ALERTS** — 가격 변동 알림
-- **WATCHLIST** — 관심 상품 목록
+### Staging (`stg_`) — 정제/정규화
+- **stg_products** — 사이트별 상품 목록 (URL 최신값으로 유지)
+- **stg_price_history** — 일별 가격 이력 (append-only)
+- **stg_latest_prices** — 상품별 최신 가격 **(VIEW, stg_price_history에서 동적 도출)**
+- **stg_price_alerts** — 가격 변동 알림
+- **stg_watchlist** — 관심 상품 목록
 
-### Analytics — 집계
-- **DAILY_PRICE_STATS** — 일별 최저/최고/평균 가격
-- **WEEKLY_PRICE_STATS** — 주별 요약
-- **PRODUCT_STATS** — 상품별 전체 통계 (MIN_PRICE_EVER/MAX_PRICE_EVER)
+### Analytics (`ans_`) — 집계
+- **ans_daily_price_stats** — 일별 최저/최고/평균 가격
+- **ans_weekly_price_stats** — 주별 요약
+- **ans_product_stats** — 상품별 전체 통계 (min_price_ever/max_price_ever)
 
 ## 대시보드 기능 (localhost:8050)
 
@@ -140,6 +141,6 @@ pip install -e ".[dev]"
 # 유닛 테스트
 python -m pytest tests/unit/ -v -o "addopts="
 
-# 통합 테스트 (Snowflake 연결 필요)
+# 통합 테스트 (로컬 MySQL 연결 필요)
 python -m pytest tests/integration/ -v -o "addopts=" -m integration
 ```

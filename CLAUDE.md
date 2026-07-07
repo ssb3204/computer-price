@@ -5,52 +5,54 @@
 - Technical terms can remain in English
 
 ## 프로젝트 개요
-컴퓨터 부품 가격 비교 사이트 3곳(다나와, 컴퓨존, 견적왕)을 크롤링하여 일일 가격을 수집하고, 가격 변동을 시각화하는 웹 대시보드. 로컬 Docker Compose로 운영.
+컴퓨터 부품 가격 비교 사이트 3곳(다나와, 컴퓨존, 견적왕)을 크롤링하여 일일 가격을 수집하고,
+가격 변동을 시각화하는 웹 대시보드. 로컬 Docker Compose로 운영.
 
 ## 기술 스택
 - Python 3.11+, BeautifulSoup (크롤링)
-- GitHub Actions (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일)
-- Snowflake (DWH, 3-Layer: Raw → Staging → Analytics)
+- GitHub Actions (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일 목표)
+- DWH: MySQL 8.0 로컬 (단일 DB `computer_price`, 3-Layer는 테이블 접두사 raw_/stg_/ans_ 방식)
 - Dash/Plotly (웹 대시보드)
 - Docker Compose (1개 서비스: dashboard)
 
+## ⚠️ 미해결 과제: GitHub Actions 스케줄링
+- DWH가 로컬 MySQL이라 GitHub Actions 러너에서 DB에 접근할 수 없다. 4회/일 자동 크롤링 스케줄이 현재 동작하지 않는다.
+- 해결 전까지는 `python run_pipeline.py`로 로컬에서 수동 실행. 대안(자체 러너, DB 외부 노출, 로컬 cron 등)은 미정.
+
 ## 데이터 흐름
-```
-크롤러 → GitHub Actions → run_pipeline.py → Snowflake (Raw → Staging → 변경감지/알림 → Analytics)
-                                                                          ↓
-                                                                   dashboard ← Snowflake
-```
+크롤러 → run_pipeline.py → MySQL (raw_ → stg_ → 변경감지/알림 → ans_)
+                                              ↓
+                                       dashboard ← MySQL
 
 ## 프로젝트 구조
-```
 src/
-├── common/          # models, config, snowflake_client
-├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py
-├── pipeline/        # crawl, load_raw, transform, quality, detect, analytics, slack, observability
-└── dashboard/       # Dash 앱, layouts/, callbacks.py, snowflake_queries.py
-run_pipeline.py      # GitHub Actions 진입점 (파이프라인 전체 실행)
-```
+├── common/          # models.py, config.py, mysql_client.py
+├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py, parser_utils.py
+├── pipeline/        # crawl, load_raw, transform, quality, detect, analytics, slack
+└── dashboard/       # app.py, callbacks.py, helpers.py, layouts/, data_access/, assets/
+run_pipeline.py      # 파이프라인 전체 실행 진입점
 
 ## 개발 규칙
 - 한번에 전부 만들지 않음. 단계별로 나눠서 각 단계마다 테스트 후 진행
-- **최하위(기초) 기능부터 구현/테스트 → 정상 확인 후 다음 단계로 진행**
-  - 여러 기능이 있으면 가장 기초가 되는 부분을 먼저 만들고, 동작 확인 후 상위 기능으로 올라감
-  - 오류 발생 시 반드시 해결하고 나서 다음 단계로 넘어감
-  - 처음부터 큰 덩어리로 작업하지 않음 — 소분류로 나눠서 진행 현황을 명확히 파악
-- **기능 설계를 먼저 완료한 후, 구현 단계를 사용자에게 보여주고 진행 여부를 확인받은 뒤에만 작업을 시작한다**
-- **사용자에게 권한 요청(진행 여부 확인) 또는 선택지를 제시하기 전에, 반드시 다음을 자체 검증한다:**
-  1. 프롬프트의 요구사항이 모두 완료됐는지 체크리스트로 확인
-  2. 완료된 작업에 실수·누락·부작용이 없는지 재확인 (파일 오염, 의도치 않은 변경 포함)
-  3. 위 2가지가 모두 OK일 때만 사용자에게 물어본다
+- 최하위(기초) 기능부터 구현/테스트 → 정상 확인 후 다음 단계로 진행
+- 여러 기능이 있으면 가장 기초가 되는 부분을 먼저 만들고, 동작 확인 후 상위 기능으로 올라감
+- 오류 발생 시 반드시 해결하고 나서 다음 단계로 넘어감
+- 처음부터 큰 덩어리로 작업하지 않음 — 소분류로 나눠서 진행 현황을 명확히 파악
+- 기능 설계를 먼저 완료한 후, 구현 단계를 사용자에게 보여주고 진행 여부를 확인받은 뒤에만 작업을 시작한다
+- 사용자에게 권한 요청(진행 여부 확인) 또는 선택지를 제시하기 전에, 반드시 다음을 자체 검증한다:
+  - 프롬프트의 요구사항이 모두 완료됐는지 체크리스트로 확인
+  - 완료된 작업에 실수·누락·부작용이 없는지 재확인 (파일 오염, 의도치 않은 변경 포함)
+  - 위 2가지가 모두 OK일 때만 사용자에게 물어본다
   - 자체 검증 없이 "완료됐습니다, 진행할까요?" 식으로 바로 묻지 않는다
 - Git: feature branch → PR → code review → merge
 - 커밋은 관련있는 것끼리 분리
 - Co-Authored-By 추가하지 않음
-- 테스트: `python -m pytest tests/ -v -o "addopts="` (pytest-cov 미설치 시)
+- 테스트: python -m pytest tests/ -v -o "addopts=" (pytest-cov 미설치 시)
 
 ## Verification
 - After implementing fixes, verify actual behavior (run integration tests, check DB state), not just unit tests
-- Before schema/dbt changes, inspect the actual source data columns first
+- Before schema changes, inspect the actual source data columns first
+- 파이프라인 계층 전환/수정 후에는 행수·NULL 비율 정합 검증을 수행
 
 ## Scope Discipline
 - When user asks 'should I X?', answer the question — do not execute X
@@ -58,29 +60,31 @@ run_pipeline.py      # GitHub Actions 진입점 (파이프라인 전체 실행)
 
 ## 기술적 주의사항
 - 다나와 크롤러: productItem* = 실제상품, adReaderProductItem*/adPointProductItem* = 광고
+- 컴퓨존 크롤러: crawl_single의 1차 경로만 product_list.php POST(EUC-KR, li.li-obj 파싱).
+  검색(search_products)은 GET — 의도된 비대칭이니 통일하지 말 것.
+  3단계 fallback: ① product_list.php POST → ② search_list.php GET → ③ 상세페이지 정규식.
+  브라우저에 보이는 div.prdbx는 AJAX 셸이라 직접 크롤링 불가 — 셀렉터 변경 금지.
 - Frozen dataclass로 모든 DTO 정의
-- Snowflake MERGE로 멱등성 보장
-- 변경 감지: LAG() 윈도우 함수로 이전 가격 비교, PRODUCT_STATS로 NEW_LOW/NEW_HIGH 판정
-- **Snowflake 타임존**: 계정 기본값 UTC-7(PDT). `CURRENT_DATE()` 대신 `CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::DATE` 사용
-- 대시보드 코드 변경 후 반드시 `docker compose restart dashboard` 필요 (hot-reload 비활성, `DASH_DEBUG=true` 시 활성)
+- DB 접속: src/common/mysql_client.py의 get_connection 사용, 드라이버는 pymysql.
+  접속 계정은 .env의 price_app만 사용 — root 금지. 새 추상화 계층(ABC/팩토리)을 만들지 않는다.
+- 멱등성: INSERT ... ON DUPLICATE KEY UPDATE + 자연키 UNIQUE 제약으로 보장
+- 증분 처리: "미처리 조인"(대상 테이블에 없는 raw 행만 조회) 방식. batch_id는 도입하지 않음
+- 변경 감지: LAG() 윈도우 함수로 이전 가격 비교, ans_product_stats로 NEW_LOW/NEW_HIGH 판정
+- 타임스탬프: DATETIME, 앱과 DB 세션 모두 UTC로 통일 저장(mysql_client가 연결 시 세션 타임존을 UTC로 고정)
+- 대시보드 코드 변경 후 반드시 docker compose restart dashboard 필요 (hot-reload 비활성, DASH_DEBUG=true 시 활성)
 
 ## Docker 서비스
 | 서비스 | 포트 |
-|--------|------|
+|---|---|
 | Dashboard | localhost:8050 |
 
 ## Environment
 - Desktop files go to the actual visible Desktop (check OneDrive redirection on Windows)
-- Confirm gh CLI and key deps (google-cloud-bigquery, etc.) are installed before scripting workflows
+- Confirm gh CLI and key deps are installed before scripting workflows
 
 ## 실행
-```bash
 docker compose up -d                    # 대시보드 시작
 docker compose restart dashboard        # 코드 변경 반영
 docker compose logs -f dashboard        # 로그 확인
 python run_pipeline.py                  # 파이프라인 로컬 수동 실행
 python -m pytest tests/ -v -o "addopts="  # 테스트 실행
-```
-
-## 하네스: 가격 모니터링
-개발 작업 요청 시 `orchestrate-price-monitor` 스킬 사용. 단순 질문은 직접 응답 가능.
