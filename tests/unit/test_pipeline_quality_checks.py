@@ -73,8 +73,8 @@ class TestFindCrossSiteAnomalies:
 
 class TestZeroCountCheck:
     def _make_settings(self):
-        from src.common.config import SnowflakeSettings
-        return MagicMock(spec=SnowflakeSettings)
+        from src.common.config import MySQLSettings
+        return MagicMock(spec=MySQLSettings)
 
     def test_zero_result_added_to_failures(self):
         """크롤러가 0건 반환하면 failures에 추가된다."""
@@ -152,7 +152,7 @@ class TestZeroCountCheck:
 
 
 def _make_mock_conn(raw_count, staging_count, missing_analytics):
-    """check_layer_consistency용 Mock Snowflake 커넥션 생성."""
+    """check_layer_consistency용 Mock MySQL 커넥션 생성."""
     cur = MagicMock()
     cur.fetchone.side_effect = [
         (raw_count, staging_count),   # Raw vs Staging 건수
@@ -190,8 +190,8 @@ class TestLayerConsistencyResult:
 
 class TestCheckLayerConsistency:
     def _make_settings(self):
-        from src.common.config import SnowflakeSettings
-        return MagicMock(spec=SnowflakeSettings)
+        from src.common.config import MySQLSettings
+        return MagicMock(spec=MySQLSettings)
 
     def test_normal_case_no_issues(self):
         """정상 케이스: 손실 낮고 누락 없음."""

@@ -3,17 +3,6 @@
 from pydantic_settings import BaseSettings
 
 
-class SnowflakeSettings(BaseSettings):
-    model_config = {"env_prefix": "SNOWFLAKE_", "env_file": ".env", "extra": "ignore"}
-
-    account: str
-    user: str
-    password: str
-    warehouse: str = "COMPUTE_WH"
-    database: str = "COMPUTER_PRICE"
-    schema_name: str = "RAW"  # 'schema' is reserved by pydantic
-
-
 class MySQLSettings(BaseSettings):
     """로컬 MySQL 8.0+ 연결 설정.
 

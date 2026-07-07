@@ -10,7 +10,6 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.12",
     "requests>=2.31",
-    "snowflake-connector-python>=3.6",
     "pymysql>=1.1",
     "dash>=2.14",
     "dash-bootstrap-components>=1.5",
@@ -50,5 +49,5 @@ profile = "black"
 testpaths = ["tests"]
 addopts = "--cov=src --cov-report=term-missing"
 markers = [
-    "integration: real Snowflake connection required (deselect with '-m not integration')",
+    "integration: real local MySQL connection required (deselect with '-m not integration')",
 ]
