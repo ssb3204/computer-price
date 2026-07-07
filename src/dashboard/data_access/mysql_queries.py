@@ -1,9 +1,9 @@
 """MySQL 쿼리 — 새 3-Layer 스키마(테이블 접두사 raw_/stg_/ans_) 기반.
 
-주의: `created_at`/`updated_at`/`loaded_at` 등 DEFAULT CURRENT_TIMESTAMP 컬럼은
-MySQL 서버 SYSTEM 타임존(KST)으로 저장된다. 반면 `crawled_at`은 앱이 UTC naive로
-직접 채운다. 두 종류를 같은 함수로 비교하지 않도록 주의(전자는 NOW(), 후자는
-UTC_DATE()/UTC_TIMESTAMP() 기준).
+mysql_client.get_connection이 연결 시 세션 타임존을 UTC(+00:00)로 고정하므로
+`crawled_at`(앱이 채우는 UTC naive)과 `created_at`/`updated_at`/`loaded_at` 등
+DEFAULT CURRENT_TIMESTAMP 컬럼(DB가 채움)이 모두 같은 UTC 기준이다.
+NOW()/UTC_TIMESTAMP()/UTC_DATE() 어느 쪽을 써도 이 연결 안에서는 동일하다.
 """
 
 import pandas as pd
@@ -233,7 +233,7 @@ def get_alerts(
         params.append(category)
 
     if days:
-        # created_at은 DEFAULT CURRENT_TIMESTAMP(서버 SYSTEM/KST) 저장이므로 NOW() 기준으로 비교
+        # 세션 타임존이 UTC로 고정돼 있어 NOW()는 UTC_TIMESTAMP()와 동일
         conditions.append("a.`created_at` >= DATE_SUB(NOW(), INTERVAL %s DAY)")
         params.append(days)
 
