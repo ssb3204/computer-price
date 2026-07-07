@@ -73,10 +73,6 @@ def crawl_and_load_single(
 
     백그라운드 스레드에서 호출. 실패해도 WATCHLIST 추가는 유지되며
     다음 스케줄 크롤링에서 재시도된다.
-
-    NOTE(Phase 3-1): load_raw는 MySQL로 전환됨. transform_staging은 아직
-    Snowflake 기반(Phase 3-2 대상)이라 이 즉시-적재 경로는 3-2 완료 전까지 미완결.
-    스케줄 크롤링(crawl_all_sites→load_raw) 경로는 정상 동작.
     """
     from src.pipeline.load_raw import load_raw
     from src.pipeline.transform import transform_staging

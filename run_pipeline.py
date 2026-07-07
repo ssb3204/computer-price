@@ -4,16 +4,17 @@ GitHub Actions 또는 로컬에서 직접 실행:
     python run_pipeline.py
 
 환경변수 필요:
-    SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD
-    SNOWFLAKE_WAREHOUSE (기본값: COMPUTE_WH)
-    SNOWFLAKE_DATABASE  (기본값: COMPUTER_PRICE)
+    MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
     SLACK_WEBHOOK_URL   (선택, 크롤링 실패 시 알림)
+
+NOTE: quality.py(Step 3.5 레이어 정합성 검증)는 아직 Snowflake 기반이라
+이 단계만 실패 로그를 남기고 건너뛴다(Phase 3-3 범위 밖, 별도 전환 예정).
 """
 
 import logging
 import sys
 
-from src.common.config import SnowflakeSettings
+from src.common.config import MySQLSettings
 from src.pipeline.analytics import aggregate_analytics
 from src.pipeline.crawl import crawl_all_sites
 from src.pipeline.detect import detect_changes
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> int:
     logger.info("=== 파이프라인 시작 ===")
-    settings = SnowflakeSettings()
+    settings = MySQLSettings()
 
     # Step 1: 크롤링
     try:

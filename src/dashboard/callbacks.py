@@ -13,15 +13,15 @@ import plotly.express as px
 from dash import html
 from dash.dependencies import ALL, Input, Output, State
 
-from src.common.config import SnowflakeSettings
-from src.common.snowflake_client import get_connection
+from src.common.config import MySQLSettings
+from src.common.mysql_client import get_connection
 from src.pipeline.crawl import crawl_and_load_single
 from src.crawlers.compuzone import enrich_names_from_detail as compuzone_enrich
 from src.crawlers.compuzone import search_products as compuzone_search
 from src.crawlers.danawa import enrich_names_from_detail as danawa_enrich
 from src.crawlers.danawa import search_products as danawa_search
 from src.crawlers.pc_estimate import search_products as pcest_search
-from src.dashboard.data_access.snowflake_queries import (
+from src.dashboard.data_access.mysql_queries import (
     add_watch_product,
     get_alerts,
     get_category_price_summary,
@@ -54,17 +54,17 @@ from src.dashboard.layouts.watchlist import watchlist_page
 
 logger = logging.getLogger(__name__)
 
-_sf_settings = None
-_sf_lock = threading.Lock()
+_mysql_settings = None
+_mysql_lock = threading.Lock()
 
 
 def _get_conn():
-    global _sf_settings
-    if _sf_settings is None:
-        with _sf_lock:
-            if _sf_settings is None:
-                _sf_settings = SnowflakeSettings()
-    return get_connection(_sf_settings)
+    global _mysql_settings
+    if _mysql_settings is None:
+        with _mysql_lock:
+            if _mysql_settings is None:
+                _mysql_settings = MySQLSettings()
+    return get_connection(_mysql_settings)
 
 
 # ── Button Toggle Helper ──
@@ -99,7 +99,7 @@ def register_callbacks(app, cache):
 
     def _trigger_single_crawl(cache, site, query, pcode, category, brand):
         """백그라운드 스레드로 단일 상품 크롤링 후 캐시 무효화."""
-        settings = SnowflakeSettings()
+        settings = MySQLSettings()
 
         def _run():
             success = crawl_and_load_single(settings, site, query, pcode, category, brand)
