@@ -13,6 +13,13 @@
 - **결과**: `.github/workflows/crawl.yml` + `run_pipeline.py`로 대체. 00:00/05:00/10:00/15:00 KST 하루 4회 실행
 - **트레이드오프**: Airflow의 재시도/의존성 관리 기능 포기 → GitHub Actions timeout 30분 + exit code로 단순 처리
 
+### Snowflake → MySQL 로컬 전환 (2026-07-08)
+- **이전 방식**: Snowflake 클라우드 DWH (계정 기반 과금)
+- **변경 이유**: 무료 체험판 크레딧 소진. 계속 과금 없이 운영하기 위해 로컬 DB로 이전
+- **결과**: 로컬 MySQL 8.0 단일 DB(`computer_price`). 3-Layer는 스키마 분리 대신 테이블 접두사(raw_/stg_/ans_)로 표현. MERGE→`INSERT ... ON DUPLICATE KEY UPDATE`, Stream→미처리 조인으로 대체
+- **트레이드오프**: GitHub Actions 러너가 로컬 DB에 접근 불가해 자동 스케줄링이 미해결 과제로 남음 (CLAUDE.md 참고)
+- 구 Snowflake DDL은 `docs/legacy/snowflake_ddl/`에 보관 (참고용, 더 이상 실행 대상 아님)
+
 ---
 
 ## 데이터 설계
