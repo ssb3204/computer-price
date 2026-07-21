@@ -31,7 +31,7 @@ class UserRow:
     deleted_at: datetime | None
 
     @classmethod
-    def from_tuple(cls, row: tuple) -> "UserRow":
+    def from_tuple(cls, row: tuple) -> UserRow:
         # _USER_COLUMNS 순서와 반드시 일치해야 한다.
         return cls(
             id=row[0],

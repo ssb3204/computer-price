@@ -17,8 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from parser.regex_parser import parse_gpu_name as parse_regex
 from parser.llm_parser import parse_gpu_name as parse_llm
+from parser.regex_parser import parse_gpu_name as parse_regex
 
 FIELDS = ["manufacturer", "chipset_maker", "model_name", "distributor"]
 DATA_PATH = ROOT / "data" / "labeled_gpu_names_v2.csv"
@@ -93,21 +93,21 @@ def fmt_pct(value) -> str:
 
 
 def print_report(name_a: str, result_a: dict, name_b: str, result_b: dict) -> None:
-    print(f"\n=== 필드별 정확도 ===")
+    print("\n=== 필드별 정확도 ===")
     print(f"{'필드':<16}{name_a:>14}{name_b:>14}")
     for field in FIELDS:
         print(f"{field:<16}{fmt_pct(result_a['field_accuracy'][field]):>14}{fmt_pct(result_b['field_accuracy'][field]):>14}")
 
-    print(f"\n=== 전체 4필드 완전 일치율 ===")
+    print("\n=== 전체 4필드 완전 일치율 ===")
     print(f"{name_a:<16}{fmt_pct(result_a['full_match_rate'])}")
     print(f"{name_b:<16}{fmt_pct(result_b['full_match_rate'])}")
 
-    print(f"\n=== 필드 누락률 (정답 有 -> 예측 null) ===")
+    print("\n=== 필드 누락률 (정답 有 -> 예측 null) ===")
     print(f"{'필드':<16}{name_a:>14}{name_b:>14}")
     for field in FIELDS:
         print(f"{field:<16}{fmt_pct(result_a['omission_rate'][field]):>14}{fmt_pct(result_b['omission_rate'][field]):>14}")
 
-    print(f"\n=== 환각률 (정답 null -> 예측 값 생성) ===")
+    print("\n=== 환각률 (정답 null -> 예측 값 생성) ===")
     print(f"{'필드':<16}{name_a:>14}{name_b:>14}")
     for field in FIELDS:
         print(f"{field:<16}{fmt_pct(result_a['hallucination_rate'][field]):>14}{fmt_pct(result_b['hallucination_rate'][field]):>14}")

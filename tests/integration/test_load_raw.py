@@ -1,6 +1,6 @@
 """Integration test: load_raw() — raw_crawled_prices 적재 검증."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -17,7 +17,7 @@ def _make_raw(name: str, price: str = "100,000원") -> RawCrawledPrice:
         price_text=price,
         brand="테스트브랜드",
         url="https://example.com",
-        crawled_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        crawled_at=datetime(2000, 1, 1, tzinfo=UTC),
     )
 
 

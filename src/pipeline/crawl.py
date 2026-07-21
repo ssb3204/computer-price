@@ -1,7 +1,7 @@
 """Step 1: 크롤링 — 3개 사이트에서 Raw 가격 수집."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 
@@ -35,14 +35,14 @@ def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], lis
                 all_raw.extend(raw_prices)
                 logger.info("[크롤링] %s: %d건", crawler.site_name, len(raw_prices))
                 if len(raw_prices) == 0:
-                    failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                     crawl_failures.append({
                         "site_name": crawler.site_name,
                         "error": "크롤링 결과 0건 — 페이지 구조 변경 의심",
                         "failed_at": failed_at,
                     })
             except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as e:
-                failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                 crawl_failures.append({
                     "site_name": crawler.site_name,
                     "error": f"{type(e).__name__}: {e}",

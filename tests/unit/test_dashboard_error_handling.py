@@ -9,7 +9,6 @@ import pytest
 
 from src.dashboard.helpers import db_error_ui
 
-
 # ── db_error_ui 헬퍼 테스트 ───────────────────────────────────────────────────
 
 

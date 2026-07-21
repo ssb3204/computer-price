@@ -35,15 +35,22 @@ dev = [
 include = ["src*"]
 
 [tool.black]
-line-length = 88
+line-length = 120
 target-version = ["py311"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["E501", "E402"]
+"tests/**" = ["E402"]
+"src/dashboard/app.py" = ["E402"]
+"src/pipeline/detect.py" = ["N806"]
+"src/**" = ["E501"]
 
 [tool.isort]
 profile = "black"

@@ -7,7 +7,7 @@
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -138,7 +138,7 @@ def crawl_single(
         if not items:
             break
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for item in items:
             name_tag = item.select_one("a.name")
             if not name_tag:
@@ -223,7 +223,7 @@ class PCEstimateCrawler(BaseCrawler):
                 if not items:
                     break
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for item in items:
                     name_tag = item.select_one("a.name")
                     if not name_tag:

@@ -5,18 +5,17 @@
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import requests
-
 from bs4 import BeautifulSoup, Tag
 from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import BaseCrawler, DEFAULT_HEADERS
+from src.crawlers.base import DEFAULT_HEADERS, BaseCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +181,7 @@ def crawl_single(
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for item in soup.select("li.prod_item"):
         if not _is_real_product(item):
             continue
@@ -237,7 +236,7 @@ class DanawaCrawler(BaseCrawler):
             if html is None:
                 continue
             soup = BeautifulSoup(html, "html.parser")
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             for item in soup.select("li.prod_item"):
                 if not _is_real_product(item):

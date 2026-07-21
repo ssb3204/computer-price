@@ -1,9 +1,11 @@
 """Verify that specific exception types are caught correctly."""
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import logging
+
 import requests
 
 logging.basicConfig(level=logging.DEBUG, format="%(name)s - %(levelname)s - %(message)s")
@@ -60,13 +62,13 @@ print("Test 4: Crawler classes import and have correct exception types")
 print("=" * 60)
 
 import inspect
-from src.crawlers.compuzone import CompuzoneCrawler
-from src.crawlers.pc_estimate import PCEstimateCrawler
-from src.crawlers.base import BaseCrawler
 
 # Check that 'requests' is importable from each module
 import src.crawlers.compuzone as cz_mod
 import src.crawlers.pc_estimate as pe_mod
+from src.crawlers.base import BaseCrawler
+from src.crawlers.compuzone import CompuzoneCrawler
+from src.crawlers.pc_estimate import PCEstimateCrawler
 
 assert hasattr(cz_mod, 'requests'), "compuzone.py missing requests import"
 print(">> compuzone.py has requests import")

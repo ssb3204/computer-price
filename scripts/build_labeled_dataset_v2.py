@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """다나와/컴퓨존/견적왕 3사이트 GPU 제품명 평가셋(v2)을 생성한다.
 
 라벨은 parser/regex_parser.py를 보지 않고 제품명 원문만 읽어 사람 기준으로 채움.
@@ -6,7 +5,6 @@
 """
 
 import csv
-import io
 
 # (site, product_name, manufacturer, chipset_maker, model_name, distributor)
 ROWS = [
@@ -144,7 +142,7 @@ ROWS = [
 
 def main() -> None:
     out_path = "data/labeled_gpu_names_v2.csv"
-    with io.open(out_path, "w", encoding="utf-8", newline="") as f:
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["product_name", "manufacturer", "chipset_maker", "model_name", "distributor", "site"])
         for site, name, mfr, chip, model, dist in ROWS:

@@ -1,6 +1,7 @@
 """search_products() 실제 동작 확인."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.crawlers.danawa import search_products

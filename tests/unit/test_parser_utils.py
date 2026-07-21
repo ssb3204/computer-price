@@ -1,8 +1,12 @@
 """Tests for parser utilities."""
 
-import pytest
 
-from src.crawlers.parser_utils import classify_category, normalize_product_name, parse_korean_price, validate_price
+from src.crawlers.parser_utils import (
+    classify_category,
+    normalize_product_name,
+    parse_korean_price,
+    validate_price,
+)
 
 
 class TestNormalizeProductName:

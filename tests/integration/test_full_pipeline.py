@@ -3,7 +3,7 @@
 Raw → Staging → Analytics 전 구간이 한 번에 정상 동작하는지 확인.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -16,8 +16,8 @@ from run_pipeline import (
 from tests.integration.conftest import TEST_PREFIX
 from tests.integration.test_detect_changes import _make_raw_at
 
-T1 = datetime(2000, 2, 1, tzinfo=timezone.utc)
-T2 = datetime(2000, 2, 2, tzinfo=timezone.utc)
+T1 = datetime(2000, 2, 1, tzinfo=UTC)
+T2 = datetime(2000, 2, 2, tzinfo=UTC)
 
 
 @pytest.mark.integration

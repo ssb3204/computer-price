@@ -8,7 +8,7 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -207,7 +207,7 @@ def crawl_single(
     """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
     medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(category.upper(), "")
     session = requests.Session()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 1차: 카테고리 목록에서 product_no 매칭 (crawl_raw와 동일한 주 경로)
     if medium_div_no:
@@ -363,7 +363,7 @@ class CompuzoneCrawler(BaseCrawler):
             if not items:
                 break
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for item in items:
                 pno = item.get("id", "").replace("li-pno-", "")
                 if pno != target["product_no"]:
@@ -409,7 +409,7 @@ class CompuzoneCrawler(BaseCrawler):
                 if not items:
                     break
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for item in items:
                     pno = item.get("id", "").replace("li-pno-", "")
                     if pno != target["product_no"]:
@@ -461,7 +461,7 @@ class CompuzoneCrawler(BaseCrawler):
                             site="compuzone", category=target["category"],
                             product_name=name, price_text=price_str,
                             brand=target["brand"], url=product_url,
-                            crawled_at=datetime.now(timezone.utc),
+                            crawled_at=datetime.now(UTC),
                         ))
                         logger.info(
                             "상세 페이지 fallback 성공: %s (ProductNo=%s)",

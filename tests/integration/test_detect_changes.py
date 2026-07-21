@@ -1,6 +1,6 @@
 """Integration test: detect_changes() — 가격 변동 감지 검증."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,8 +21,8 @@ def _make_raw_at(name: str, price: str, crawled_at: datetime) -> RawCrawledPrice
     )
 
 
-T1 = datetime(2000, 1, 1, tzinfo=timezone.utc)
-T2 = datetime(2000, 1, 2, tzinfo=timezone.utc)
+T1 = datetime(2000, 1, 1, tzinfo=UTC)
+T2 = datetime(2000, 1, 2, tzinfo=UTC)
 
 
 @pytest.mark.integration

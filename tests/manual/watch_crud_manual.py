@@ -9,13 +9,14 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
+
 load_dotenv(ROOT / ".env")
 
 from src.common.config import MySQLSettings
 from src.common.mysql_client import get_connection
 from src.dashboard.data_access.mysql_queries import (
-    get_watch_products,
     add_watch_product,
+    get_watch_products,
     remove_watch_product,
 )
 

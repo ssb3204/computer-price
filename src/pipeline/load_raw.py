@@ -1,7 +1,7 @@
 """Step 2: Raw 적재 — 크롤링 결과를 raw_crawled_prices에 저장."""
 
 import logging
-from datetime import timezone
+from datetime import UTC
 
 from src.common.config import MySQLSettings
 from src.common.models import RawCrawledPrice
@@ -25,7 +25,7 @@ def load_raw(settings: MySQLSettings, all_raw: list[RawCrawledPrice]) -> int:
         (
             rp.site, rp.category, rp.product_name, rp.price_text,
             rp.brand, rp.url,
-            rp.crawled_at.astimezone(timezone.utc).replace(tzinfo=None),
+            rp.crawled_at.astimezone(UTC).replace(tzinfo=None),
         )
         for rp in all_raw
     ]
