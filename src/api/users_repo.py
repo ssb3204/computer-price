@@ -90,7 +90,10 @@ def reactivate_user(
     """탈퇴한 유저(deleted_at IS NOT NULL)를 재활성화.
 
     deleted_at 을 NULL 로 되돌리고 비밀번호를 새로 설정한다.
-    복귀 시점에 본인이 새 비밀번호로 다시 가입하는 시나리오.
+
+    ⚠️ 현재 미사용: 소유권 검증 수단(로그인 인증/이메일)이 없어 재활성화를
+    막아둔 상태다(users_router.create_user 참고). 인증 도입 후 "탈퇴 계정
+    복구" 기능에서 소유권 확인과 함께 사용하기 위해 남겨둔다.
     """
     sql = (
         "UPDATE users SET password_hash = %s, deleted_at = NULL "

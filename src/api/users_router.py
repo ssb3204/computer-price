@@ -1,7 +1,7 @@
 """users CRUD 라우터 (FastAPI).
 
 엔드포인트:
-  POST   /users            회원가입 (신규 or 탈퇴계정 재활성화)
+  POST   /users            회원가입 (신규만; 탈퇴 아이디 재활성화는 미지원)
   GET    /users/{user_id}  단건 조회 (활성 유저만)
   PATCH  /users/{user_id}  비밀번호 변경
   DELETE /users/{user_id}  탈퇴 (soft delete)
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 def get_settings() -> MySQLSettings:
     """설정 의존성. 실제 config 초기화 방식에 맞춰 조정 가능.
 
-    pydantic-settings 기반이면 MySQLSettings() 가 환경변수/‑.env 에서
+    pydantic-settings 기반이면 MySQLSettings() 가 환경변수/.env 에서
     값을 읽어온다. 초기화 인자가 필요하면 이 함수만 수정하면 된다.
     """
     return MySQLSettings()
@@ -52,35 +52,31 @@ def create_user(
 ) -> UserPublic:
     """회원가입.
 
-    username 상태에 따라 3-way 분기:
-      1) 존재 + 활성      -> 409 중복
-      2) 존재 + 탈퇴상태   -> 재활성화(본인 복귀로 간주, 비밀번호 재설정)
-      3) 미존재           -> 신규 INSERT
+    username 재사용 정책 A: username UNIQUE 는 활성/탈퇴 무관하게 유지된다.
+    따라서 이미 존재하는 username(활성이든 탈퇴든)은 모두 409 로 거절한다.
 
-    주의: autocommit=True 라 트랜잭션 잠금이 없으므로, 조회~삽입 사이에
-    다른 요청이 같은 username 을 넣는 경쟁이 이론상 가능하다. 그래서
-    신규 INSERT 는 username UNIQUE 제약을 최종 방어선으로 삼고,
-    IntegrityError 를 409 로 변환한다(check-then-act 의 원자성 보완).
+    탈퇴 계정 "재활성화"는 지금 단계에서는 지원하지 않는다. 이유:
+    재활성화는 "정말 그 계정의 원래 주인인가"를 확인해야 안전한데,
+    현재는 로그인 인증도 이메일 검증도 없어 소유권을 확인할 수단이 없다.
+    확인 없이 재활성화하면 남이 탈퇴 계정의 아이디를 가로챌 수 있다.
+    -> 인증 시스템이 도입된 뒤 "탈퇴 계정 복구" 기능으로 별도 설계한다.
+
+    성능/DoS 주의: bcrypt 해싱은 비용이 크므로, 먼저 username 중복을
+    확인해 거절될 요청은 해싱 없이 빠르게 반려한다(해싱을 뒤로 미룸).
+    또한 autocommit=True 라 조회~삽입 사이 경쟁이 가능하므로,
+    최종 방어선으로 username UNIQUE 제약 위반(IntegrityError)을 409 로 변환한다.
     """
-    pw_hash = hash_password(payload.password)
+    # 1) 먼저 중복 확인 (해싱 전에 — 거절될 요청의 해싱 비용 회피)
+    #    활성/탈퇴 무관하게 username 이 존재하면 거절(정책 A).
     existing = users_repo.get_by_username(settings, payload.username)
-
-    # 1) 활성 유저가 이미 있으면 중복
-    if existing is not None and existing.deleted_at is None:
+    if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="이미 사용 중인 아이디입니다.",
         )
 
-    # 2) 탈퇴한 유저면 재활성화 (같은 id 를 되살림)
-    if existing is not None and existing.deleted_at is not None:
-        users_repo.reactivate_user(settings, existing.id, pw_hash)
-        refreshed = users_repo.get_active_by_id(settings, existing.id)
-        # 재활성화 직후엔 반드시 활성 상태여야 한다.
-        assert refreshed is not None
-        return _to_public(refreshed)
-
-    # 3) 신규 INSERT (UNIQUE 제약을 최종 방어선으로)
+    # 2) 통과한 요청만 해싱 후 INSERT
+    pw_hash = hash_password(payload.password)
     try:
         new_id = users_repo.insert_user(settings, payload.username, pw_hash)
     except IntegrityError:
@@ -115,14 +111,20 @@ def update_user_password(
     payload: PasswordUpdate,
     settings: MySQLSettings = Depends(get_settings),
 ) -> UserPublic:
-    """활성 유저의 비밀번호 변경."""
-    pw_hash = hash_password(payload.new_password)
-    affected = users_repo.update_password(settings, user_id, pw_hash)
-    if affected == 0:
+    """활성 유저의 비밀번호 변경.
+
+    존재하지 않는 user_id 는 해싱 전에 404 로 반려한다(불필요한 해싱 회피).
+    """
+    # 대상이 없으면 해싱 전에 404
+    target = users_repo.get_active_by_id(settings, user_id)
+    if target is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="사용자를 찾을 수 없습니다.",
         )
+
+    pw_hash = hash_password(payload.new_password)
+    users_repo.update_password(settings, user_id, pw_hash)
     user = users_repo.get_active_by_id(settings, user_id)
     assert user is not None
     return _to_public(user)
