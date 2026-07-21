@@ -1,40 +1,44 @@
-name: 가격 크롤링 파이프라인
+name: 가격 크롤링 파이프라인 (수동 · 참고용)
+
+# ⚠️ 중요 안내 ─────────────────────────────────────────────────
+# 이 파이프라인은 로컬 MySQL(호스트 설치)에 적재한다. GitHub 클라우드
+# 러너(ubuntu-latest)는 로컬 MySQL 에 접근할 수 없으므로, 이 워크플로우를
+# 클라우드에서 실행하면 DB 접속에서 실패한다.
+#
+# 따라서 자동 스케줄(cron)은 제거했다. 크롤링은 로컬에서 실행한다:
+#     python run_pipeline.py
+# (컴퓨터가 켜져 있을 때 수동 또는 OS 스케줄러로 실행)
+#
+# 이 파일은 workflow_dispatch(수동 트리거)만 남겨 이력·참고용으로 둔다.
+# 실제로 클라우드에서 크롤링을 돌리려면 DB 를 클라우드로 옮기고(예: RDS),
+# 아래 env 에 MYSQL_* 시크릿을 주입하도록 바꿔야 한다.
+# ───────────────────────────────────────────────────────────────
 
 on:
-  schedule:
-    # 00:00, 05:00, 10:00, 15:00 KST (= 15:00, 20:00, 01:00, 06:00 UTC)
-    - cron: "0 15 * * *"
-    - cron: "0 20 * * *"
-    - cron: "0 1  * * *"
-    - cron: "0 6  * * *"
-  workflow_dispatch:  # 수동 실행 허용
+  workflow_dispatch:  # 수동 트리거만 (자동 스케줄 없음)
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-
       - name: Python 3.11 설정
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
       - name: 의존성 설치
         run: pip install -e .
-
       - name: 파이프라인 실행
+        # 주의: 로컬 MySQL 사용 시 이 스텝은 클라우드에서 실패한다.
+        # 클라우드 실행을 원하면 클라우드 DB 로 전환 후 MYSQL_* 시크릿을 주입할 것.
         env:
-          SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE:  ${{ secrets.SNOWFLAKE_DATABASE }}
-          SLACK_WEBHOOK_URL:   ${{ secrets.SLACK_WEBHOOK_URL }}
+          MYSQL_HOST:      ${{ secrets.MYSQL_HOST }}
+          MYSQL_PORT:      ${{ secrets.MYSQL_PORT }}
+          MYSQL_USER:      ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD:  ${{ secrets.MYSQL_PASSWORD }}
+          MYSQL_DATABASE:  ${{ secrets.MYSQL_DATABASE }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python run_pipeline.py
