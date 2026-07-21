@@ -3,11 +3,14 @@
 GitHub Actions 또는 로컬에서 직접 실행:
     python run_pipeline.py
 
-환경변수 필요:
-    MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
-    SLACK_WEBHOOK_URL   (선택, 크롤링 실패 시 알림)
+환경변수 필요 (MYSQL_ 접두사, .env 파일 또는 환경변수로 주입):
+    MYSQL_HOST      (기본값: localhost)
+    MYSQL_PORT      (기본값: 3306)
+    MYSQL_USER      (기본값: price_app)
+    MYSQL_PASSWORD  (필수)
+    MYSQL_DATABASE  (기본값: computer_price)
+    SLACK_WEBHOOK_URL (선택, 크롤링 실패 시 알림)
 """
-
 import logging
 import sys
 
@@ -93,7 +96,6 @@ def main() -> int:
     if len(crawl_failures) == 3:
         logger.error("모든 사이트 크롤링 실패 — exit 1")
         return 1
-
     return 0
 
 
