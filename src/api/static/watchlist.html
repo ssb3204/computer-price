@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>크롤링 대상 관리</title>
+<style>
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    background: #f4f4f5;
+    color: #111;
+  }
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 16px;
+  }
+  h2 {
+    font-size: 16px;
+    margin: 0 0 12px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    margin-bottom: 20px;
+  }
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  select, input[type="text"] {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  select {
+    flex: 0 0 auto;
+  }
+  input[type="text"] {
+    flex: 1;
+    min-width: 140px;
+  }
+  button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #searchBtn {
+    background: #2563eb;
+    color: #fff;
+  }
+  #loadMoreBtn {
+    background: #e5e7eb;
+    color: #111;
+    width: 100%;
+    margin-top: 4px;
+  }
+  #addSelectedBtn {
+    background: #2563eb;
+    color: #fff;
+    width: 100%;
+    margin-top: 8px;
+  }
+  #addSelectedBtn:disabled {
+    background: #93c5fd;
+    cursor: not-allowed;
+  }
+  .hidden {
+    display: none;
+  }
+  .result-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .result-item:last-child {
+    border-bottom: none;
+  }
+  .result-item input[type="checkbox"] {
+    margin-top: 4px;
+  }
+  .result-name {
+    font-size: 14px;
+    color: #111;
+  }
+  .result-pcode {
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .loading,
+  .empty {
+    font-size: 13px;
+    color: #6b7280;
+    padding: 8px 0;
+  }
+  .watch-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .watch-item:last-child {
+    border-bottom: none;
+  }
+  .watch-meta {
+    font-size: 12px;
+    color: #6b7280;
+  }
+  .watch-item button {
+    background: #fff;
+    color: #dc2626;
+    border: 1px solid #dc2626;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  #message {
+    font-size: 13px;
+    text-align: center;
+    min-height: 18px;
+    margin-top: 4px;
+  }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: #2563eb;
+    font-size: 14px;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <a class="back-link" id="backLink" href="/home">&larr; 홈으로</a>
+    <h1>크롤링 대상 관리</h1>
+
+    <div class="card">
+      <h2>상품 검색</h2>
+      <div class="search-row">
+        <select id="siteSelect">
+          <option value="다나와">다나와</option>
+          <option value="컴퓨존">컴퓨존</option>
+          <option value="견적왕">견적왕</option>
+        </select>
+        <select id="categorySelect">
+          <option value="CPU">CPU</option>
+          <option value="GPU" selected>GPU</option>
+          <option value="RAM">RAM</option>
+          <option value="SSD">SSD</option>
+        </select>
+        <input id="queryInput" type="text" placeholder="검색어 입력 (예: RTX 5070)">
+        <button id="searchBtn">검색</button>
+      </div>
+      <div id="searchResults"></div>
+      <button id="loadMoreBtn" class="hidden" type="button">더 보기</button>
+      <button id="addSelectedBtn" disabled>선택 완료 (0개)</button>
+      <div id="message"></div>
+    </div>
+
+    <div class="card">
+      <h2>내 크롤링 대상</h2>
+      <div id="myWatchlist"><div class="loading">불러오는 중...</div></div>
+    </div>
+  </div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const userId = params.get('id');
+  document.getElementById('backLink').href = `/home?id=${encodeURIComponent(userId || '')}`;
+
+  const siteSelect = document.getElementById('siteSelect');
+  const categorySelect = document.getElementById('categorySelect');
+  const queryInput = document.getElementById('queryInput');
+  const searchBtn = document.getElementById('searchBtn');
+  const searchResults = document.getElementById('searchResults');
+  const loadMoreBtn = document.getElementById('loadMoreBtn');
+  const addSelectedBtn = document.getElementById('addSelectedBtn');
+  const messageEl = document.getElementById('message');
+  const myWatchlistEl = document.getElementById('myWatchlist');
+
+  const PAGE_SIZE = 10;
+  let currentMaxResults = PAGE_SIZE;
+  let lastResults = [];
+  const selectedIndexes = new Set();
+
+  function showMessage(text, isError) {
+    messageEl.textContent = text;
+    messageEl.style.color = isError ? '#dc2626' : '#16a34a';
+  }
+
+  function updateAddButton() {
+    addSelectedBtn.disabled = selectedIndexes.size === 0;
+    addSelectedBtn.textContent = `선택 완료 (${selectedIndexes.size}개)`;
+  }
+
+  function doSearch() {
+    const query = queryInput.value.trim();
+    if (!query) {
+      showMessage('검색어를 입력해주세요.', true);
+      return;
+    }
+    currentMaxResults = PAGE_SIZE;
+    selectedIndexes.clear();
+    updateAddButton();
+    fetchResults(false);
+  }
+
+  function loadMore() {
+    const previousCount = lastResults.length;
+    currentMaxResults += PAGE_SIZE;
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = '불러오는 중...';
+    fetchResults(true, previousCount);
+  }
+
+  function resetLoadMoreBtn() {
+    loadMoreBtn.disabled = false;
+    loadMoreBtn.textContent = '더 보기';
+  }
+
+  async function fetchResults(isLoadMore, previousCount = 0) {
+    if (!isLoadMore) {
+      // 신규 검색만 전체를 로딩 표시로 덮는다. "더보기"는 기존 목록을 그대로 두고
+      // 버튼만 "불러오는 중..."으로 바꿔 아래쪽에서 자연스럽게 이어붙는 느낌을 준다.
+      searchResults.innerHTML = '<div class="loading">검색 중... (사이트에 직접 요청하므로 몇 초 걸릴 수 있습니다)</div>';
+      loadMoreBtn.classList.add('hidden');
+    }
+
+    const query = queryInput.value.trim();
+    const site = siteSelect.value;
+    const category = categorySelect.value;
+    const url = `/crawl/search?site=${encodeURIComponent(site)}&query=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}&max_results=${currentMaxResults}`;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) {
+        if (!isLoadMore) searchResults.innerHTML = '';
+        showMessage(data.detail || '검색에 실패했습니다.', true);
+        resetLoadMoreBtn();
+        loadMoreBtn.classList.add('hidden');
+        return;
+      }
+      if (data.length === 0) {
+        if (!isLoadMore) searchResults.innerHTML = '<div class="empty">검색 결과가 없습니다.</div>';
+        resetLoadMoreBtn();
+        loadMoreBtn.classList.add('hidden');
+        return;
+      }
+
+      // 같은 검색을 max_results만 늘려 다시 부르는 방식이라, 앞쪽 항목의 순서는
+      // 그대로 유지된다 — 그래서 인덱스 기반 selectedIndexes가 "더 보기" 이후에도 안전하고,
+      // previousCount부터의 새 항목만 DOM에 이어붙이면 기존 화면이 안 흔들린다.
+      lastResults = data.map((r) => ({ ...r, site, category }));
+      if (isLoadMore) {
+        appendResults(previousCount);
+      } else {
+        renderResults();
+      }
+
+      resetLoadMoreBtn();
+      // 요청한 만큼 다 찼으면 다음 페이지가 더 있을 수 있다고 보고 버튼을 보여준다.
+      if (data.length >= currentMaxResults) {
+        loadMoreBtn.classList.remove('hidden');
+      } else {
+        loadMoreBtn.classList.add('hidden');
+      }
+    } catch (e) {
+      if (!isLoadMore) searchResults.innerHTML = '';
+      showMessage('서버에 연결할 수 없습니다.', true);
+      resetLoadMoreBtn();
+      loadMoreBtn.classList.add('hidden');
+    }
+  }
+
+  function buildResultRow(item, i) {
+    const row = document.createElement('div');
+    row.className = 'result-item';
+    row.innerHTML = `
+      <input type="checkbox" id="chk-${i}">
+      <div>
+        <div class="result-name">${item.product_name}</div>
+        <div class="result-pcode">${item.pcode}</div>
+      </div>
+    `;
+    const checkbox = row.querySelector('input');
+    checkbox.checked = selectedIndexes.has(i);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectedIndexes.add(i);
+      } else {
+        selectedIndexes.delete(i);
+      }
+      updateAddButton();
+    });
+    return row;
+  }
+
+  function renderResults() {
+    searchResults.innerHTML = '';
+    lastResults.forEach((item, i) => searchResults.appendChild(buildResultRow(item, i)));
+  }
+
+  function appendResults(fromIndex) {
+    for (let i = fromIndex; i < lastResults.length; i++) {
+      searchResults.appendChild(buildResultRow(lastResults[i], i));
+    }
+  }
+
+  async function addSelected() {
+    if (!userId) {
+      showMessage('로그인 정보가 없습니다. 다시 로그인해주세요.', true);
+      return;
+    }
+    const items = Array.from(selectedIndexes).map((i) => {
+      const r = lastResults[i];
+      return {
+        site: r.site,
+        query: queryInput.value.trim(),
+        pcode: r.pcode,
+        product_name: r.product_name,
+        category: r.category,
+        brand: null,
+      };
+    });
+
+    addSelectedBtn.disabled = true;
+    try {
+      const res = await fetch(`/users/${encodeURIComponent(userId)}/watchlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 201) {
+        showMessage(`${items.length}개 추가되었습니다.`, false);
+        searchResults.innerHTML = '';
+        loadMoreBtn.classList.add('hidden');
+        currentMaxResults = PAGE_SIZE;
+        lastResults = [];
+        selectedIndexes.clear();
+        updateAddButton();
+        loadMyWatchlist();
+      } else {
+        showMessage(data.detail || '추가에 실패했습니다.', true);
+        updateAddButton();
+      }
+    } catch (e) {
+      showMessage('서버에 연결할 수 없습니다.', true);
+      updateAddButton();
+    }
+  }
+
+  async function loadMyWatchlist() {
+    if (!userId) {
+      myWatchlistEl.innerHTML = '<div class="empty">로그인 정보가 없습니다.</div>';
+      return;
+    }
+    try {
+      const res = await fetch(`/users/${encodeURIComponent(userId)}/watchlist`);
+      const data = await res.json();
+      if (!res.ok) {
+        myWatchlistEl.innerHTML = '<div class="empty">불러오지 못했습니다.</div>';
+        return;
+      }
+      if (data.length === 0) {
+        myWatchlistEl.innerHTML = '<div class="empty">아직 담은 상품이 없습니다.</div>';
+        return;
+      }
+      myWatchlistEl.innerHTML = '';
+      data.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'watch-item';
+        row.innerHTML = `
+          <div>
+            <div>${item.product_name || item.pcode}</div>
+            <div class="watch-meta">${item.site} · ${item.category}</div>
+          </div>
+          <button type="button">빼기</button>
+        `;
+        row.querySelector('button').addEventListener('click', () => removeItem(item.watchlist_id));
+        myWatchlistEl.appendChild(row);
+      });
+    } catch (e) {
+      myWatchlistEl.innerHTML = '<div class="empty">서버에 연결할 수 없습니다.</div>';
+    }
+  }
+
+  async function removeItem(watchlistId) {
+    try {
+      const res = await fetch(`/users/${encodeURIComponent(userId)}/watchlist/${watchlistId}`, {
+        method: 'DELETE',
+      });
+      if (res.status === 204) {
+        loadMyWatchlist();
+      } else {
+        showMessage('삭제에 실패했습니다.', true);
+      }
+    } catch (e) {
+      showMessage('서버에 연결할 수 없습니다.', true);
+    }
+  }
+
+  searchBtn.addEventListener('click', doSearch);
+  queryInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doSearch();
+  });
+  loadMoreBtn.addEventListener('click', loadMore);
+  addSelectedBtn.addEventListener('click', addSelected);
+
+  loadMyWatchlist();
+</script>
+</body>
+</html>

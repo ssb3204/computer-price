@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원가입</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    background: #f4f4f5;
+  }
+  .box {
+    background: #fff;
+    padding: 32px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    width: 320px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+  .field {
+    margin-bottom: 14px;
+  }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .input-row {
+    display: flex;
+    gap: 6px;
+  }
+  .input-row input {
+    flex: 1;
+    min-width: 0;
+  }
+  .input-row button {
+    width: auto;
+    flex: 0 0 auto;
+    padding: 0 14px;
+    margin-bottom: 0;
+  }
+  #pwCheckBtn,
+  #emailCheckBtn,
+  #usernameCheckBtn {
+    background: #e5e7eb;
+    color: #111;
+  }
+  #pwStatus,
+  #emailStatus,
+  #usernameStatus {
+    font-size: 12px;
+    margin-top: 4px;
+    min-height: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #signupBtn {
+    background: #2563eb;
+    color: #fff;
+    margin-top: 6px;
+  }
+  #backBtn {
+    background: #e5e7eb;
+    color: #111;
+  }
+  #message {
+    margin-top: 8px;
+    font-size: 13px;
+    text-align: center;
+    min-height: 18px;
+  }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="field">
+      <label for="username">아이디</label>
+      <div class="input-row">
+        <input id="username" type="text" placeholder="3자 이상" autocomplete="username">
+        <button id="usernameCheckBtn" type="button">중복확인</button>
+      </div>
+      <div id="usernameStatus"></div>
+    </div>
+
+    <div class="field">
+      <label for="password">비밀번호</label>
+      <div class="input-row">
+        <input id="password" type="password" placeholder="8자 이상" autocomplete="new-password">
+        <button id="pwCheckBtn" type="button">확인</button>
+      </div>
+      <div id="pwStatus"></div>
+    </div>
+
+    <div class="field">
+      <label for="email">이메일</label>
+      <div class="input-row">
+        <input id="email" type="email" placeholder="example@email.com" autocomplete="email">
+        <button id="emailCheckBtn" type="button">중복확인</button>
+      </div>
+      <div id="emailStatus"></div>
+    </div>
+
+    <div class="field">
+      <label for="name">이름</label>
+      <input id="name" type="text" placeholder="실명">
+    </div>
+
+    <div class="field">
+      <label for="nickname">닉네임</label>
+      <input id="nickname" type="text" placeholder="다른 사람과 겹치지 않게">
+    </div>
+
+    <div class="field">
+      <label for="birthDate">생년월일</label>
+      <input id="birthDate" type="date">
+    </div>
+
+    <button id="signupBtn">가입하기</button>
+    <button id="backBtn">로그인으로 돌아가기</button>
+    <div id="message"></div>
+  </div>
+
+<script>
+  const usernameEl = document.getElementById('username');
+  const passwordEl = document.getElementById('password');
+  const emailEl = document.getElementById('email');
+  const nameEl = document.getElementById('name');
+  const nicknameEl = document.getElementById('nickname');
+  const birthDateEl = document.getElementById('birthDate');
+  const pwStatusEl = document.getElementById('pwStatus');
+  const emailStatusEl = document.getElementById('emailStatus');
+  const usernameStatusEl = document.getElementById('usernameStatus');
+  const messageEl = document.getElementById('message');
+
+  let passwordVerified = false;
+  let emailVerified = false;
+  let usernameVerified = false;
+  const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+  function showMessage(text, isError) {
+    messageEl.textContent = text;
+    messageEl.style.color = isError ? '#dc2626' : '#16a34a';
+  }
+
+  async function checkUsername() {
+    const username = usernameEl.value;
+    if (username.length < 3) {
+      usernameVerified = false;
+      usernameStatusEl.textContent = '아이디는 3자 이상이어야 합니다.';
+      usernameStatusEl.style.color = '#dc2626';
+      return;
+    }
+    try {
+      const res = await fetch(`/users/check-username?username=${encodeURIComponent(username)}`);
+      const data = await res.json();
+      if (data.available) {
+        usernameVerified = true;
+        usernameStatusEl.textContent = '사용 가능한 아이디입니다.';
+        usernameStatusEl.style.color = '#16a34a';
+      } else {
+        usernameVerified = false;
+        usernameStatusEl.textContent = '이미 사용 중인 아이디입니다. 다시 입력해주세요.';
+        usernameStatusEl.style.color = '#dc2626';
+        usernameEl.value = '';
+        usernameEl.focus();
+      }
+    } catch (e) {
+      usernameVerified = false;
+      usernameStatusEl.textContent = '중복 확인에 실패했습니다.';
+      usernameStatusEl.style.color = '#dc2626';
+    }
+  }
+
+  // 아이디를 확인 이후에 다시 수정하면 재확인 전까지는 무효 처리
+  usernameEl.addEventListener('input', () => {
+    usernameVerified = false;
+    usernameStatusEl.textContent = '';
+  });
+
+  function checkPassword() {
+    if (passwordEl.value.length >= 8) {
+      passwordVerified = true;
+      pwStatusEl.textContent = '사용 가능한 비밀번호입니다.';
+      pwStatusEl.style.color = '#16a34a';
+    } else {
+      passwordVerified = false;
+      pwStatusEl.textContent = '비밀번호는 8자 이상이어야 합니다. 다시 입력해주세요.';
+      pwStatusEl.style.color = '#dc2626';
+      passwordEl.value = '';
+      passwordEl.focus();
+    }
+  }
+
+  // 비밀번호를 확인 이후에 다시 수정하면 재확인 전까지는 무효 처리
+  passwordEl.addEventListener('input', () => {
+    passwordVerified = false;
+    pwStatusEl.textContent = '';
+  });
+
+  async function checkEmail() {
+    const email = emailEl.value;
+    if (!EMAIL_RE.test(email)) {
+      emailVerified = false;
+      emailStatusEl.textContent = '올바른 이메일 형식이 아닙니다.';
+      emailStatusEl.style.color = '#dc2626';
+      return;
+    }
+    try {
+      const res = await fetch(`/users/check-email?email=${encodeURIComponent(email)}`);
+      const data = await res.json();
+      if (data.available) {
+        emailVerified = true;
+        emailStatusEl.textContent = '사용 가능한 이메일입니다.';
+        emailStatusEl.style.color = '#16a34a';
+      } else {
+        emailVerified = false;
+        emailStatusEl.textContent = '이미 사용 중인 이메일입니다. 다시 입력해주세요.';
+        emailStatusEl.style.color = '#dc2626';
+        emailEl.value = '';
+        emailEl.focus();
+      }
+    } catch (e) {
+      emailVerified = false;
+      emailStatusEl.textContent = '중복 확인에 실패했습니다.';
+      emailStatusEl.style.color = '#dc2626';
+    }
+  }
+
+  // 이메일을 확인 이후에 다시 수정하면 재확인 전까지는 무효 처리
+  emailEl.addEventListener('input', () => {
+    emailVerified = false;
+    emailStatusEl.textContent = '';
+  });
+
+  async function signup() {
+    if (!usernameVerified) {
+      showMessage('아이디 중복확인 버튼을 먼저 눌러주세요.', true);
+      return;
+    }
+    if (!passwordVerified) {
+      showMessage('비밀번호 확인 버튼을 먼저 눌러주세요.', true);
+      return;
+    }
+    if (!emailVerified) {
+      showMessage('이메일 중복확인 버튼을 먼저 눌러주세요.', true);
+      return;
+    }
+
+    const payload = {
+      username: usernameEl.value,
+      password: passwordEl.value,
+      email: emailEl.value,
+      name: nameEl.value,
+      nickname: nicknameEl.value,
+      birth_date: birthDateEl.value,
+    };
+
+    try {
+      const res = await fetch('/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 201) {
+        showMessage('회원가입 성공. 로그인 페이지로 이동합니다.', false);
+        setTimeout(() => {
+          window.location.href = '/main';
+        }, 1000);
+      } else if (res.status === 422) {
+        const detail = Array.isArray(data.detail) ? data.detail[0]?.msg : data.detail;
+        showMessage(detail || '입력값을 확인해주세요.', true);
+      } else {
+        showMessage(data.detail || '회원가입 실패', true);
+      }
+    } catch (e) {
+      showMessage('서버에 연결할 수 없습니다.', true);
+    }
+  }
+
+  document.getElementById('usernameCheckBtn').addEventListener('click', checkUsername);
+  document.getElementById('pwCheckBtn').addEventListener('click', checkPassword);
+  document.getElementById('emailCheckBtn').addEventListener('click', checkEmail);
+  document.getElementById('signupBtn').addEventListener('click', signup);
+  document.getElementById('backBtn').addEventListener('click', () => {
+    window.location.href = '/main';
+  });
+</script>
+</body>
+</html>
