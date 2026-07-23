@@ -19,6 +19,7 @@ from src.crawlers.base import BaseCrawler
 logger = logging.getLogger(__name__)
 
 LIST_URL = "https://kjwwang.com/skin/shop/basic/product_list_include_plist.php"
+SEARCH_TOKEN_URL = "https://kjwwang.com/shop/product_search.html"
 DETAIL_BASE = "https://kjwwang.com"
 MAX_SEARCH_PAGES = 5
 
@@ -43,8 +44,34 @@ def _extract_pd_no(href: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _get_search_token(session: requests.Session, query: str) -> str | None:
+    """product_search.html 최초 요청에서 세션 종속 검색 토큰(search_query)을 얻는다.
+
+    실측 확인: 이 토큰 없이 action=pc_estimate_keyword 를 호출하면 검색어/카테고리가
+    맞아도 결과가 항상 0건이다. 사이트 검색창(main_search)이 실제로 쓰는 흐름을
+    그대로 재현한다 — 이 페이지는 카테고리별 매칭 개수를 보여주는 탭도 함께 내려주는데,
+    그 탭에 적힌 개수(예: "그래픽카드 (28)")가 실제 사이트 검색 결과와 정확히 일치함을
+    확인했다(요청받은 버그 리포트의 "9070 검색 시 29개" — 전체탭 기준 개수).
+    """
+    try:
+        resp = session.post(SEARCH_TOKEN_URL, data={"main_search": query}, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = "euc-kr"
+    except requests.RequestException as e:
+        logger.error("검색 토큰 요청 실패: %s", e)
+        return None
+    match = re.search(r'id="search_query"[^>]*value="([^"]*)"', resp.text)
+    return match.group(1) if match else None
+
+
 def search_products(query: str, category: str, max_results: int = 10) -> list[SearchResult]:
     """카테고리 + 검색어로 견적왕을 검색해 매칭되는 상품 목록을 반환한다.
+
+    kjwwang.com의 진짜 키워드 검색(action=pc_estimate_keyword + search_cate)을 쓴다.
+    카테고리(cate1/cate2)만으로 목록을 가져와 이름을 클라이언트에서 문자열로 걸러내던
+    이전 방식은, 카테고리 전체가 40페이지 넘게 있고 매칭 상품은 페이지 곳곳에 드문드문
+    있어 앞쪽 몇 페이지만 봐서는 실제 검색 결과 대비 턱없이 적게 나오는 문제가 있었다.
+    search_cate 코드는 CATEGORY_TO_CATE2 와 동일하다(실측 확인).
 
     Args:
         query: 검색어 (예: "RTX 5080", "라이젠 7800X3D")
@@ -54,28 +81,41 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
     Returns:
         SearchResult 리스트 (최대 max_results개)
     """
-    cate2 = CATEGORY_TO_CATE2.get(category.upper())
-    if cate2 is None:
+    cate = CATEGORY_TO_CATE2.get(category.upper())
+    if cate is None:
         logger.warning("지원하지 않는 카테고리: %s", category)
         return []
 
     session = requests.Session()
-    results: list[SearchResult] = []
-    query_lower = query.lower()
+    token = _get_search_token(session, query)
+    if token is None:
+        return []
 
-    # kjwwang.com은 서버 검색어 필터링을 지원하지 않으므로 카테고리 목록을 가져와 이름으로 필터링
+    results: list[SearchResult] = []
+
     for page in range(1, MAX_SEARCH_PAGES + 1):
         form_data = {
-            "depth": "2", "cate1": "2", "cate2": cate2,
+            "sort": "",
+            "action": "pc_estimate_keyword",
+            "search_word": query,
+            "search1": "",
+            "search_query": token,
+            "search_cate": cate,
+            "sprice": "",
+            "eprice": "",
             "page": str(page),
+            "list_sort_type": "",
             "view_type": "list",
+            "timeid": "0",
         }
         try:
-            resp = session.post(LIST_URL, data=form_data, timeout=30)
+            resp = session.post(
+                LIST_URL, data=form_data, timeout=30, headers={"Referer": SEARCH_TOKEN_URL}
+            )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
         except requests.RequestException as e:
-            logger.error("search_products 요청 실패: %s", e)
+            logger.error("search_products 요청 실패(page=%d): %s", page, e)
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -88,8 +128,6 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
             if not name_tag:
                 continue
             product_name = name_tag.get_text(separator=" ", strip=True)
-            if query_lower not in product_name.lower():
-                continue
             href = name_tag.get("href", "")
             pd_no = _extract_pd_no(href)
             if not pd_no:
