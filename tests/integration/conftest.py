@@ -24,17 +24,9 @@ def _cleanup(settings: MySQLSettings) -> None:
 
         if test_pids:
             placeholders = ", ".join(["%s"] * len(test_pids))
-            # Analytics (ans_product_stats has FK → stg_products)
-            cur.execute(
-                f"DELETE FROM `ans_product_stats` WHERE `product_id` IN ({placeholders})",
-                test_pids,
-            )
+            # Analytics
             cur.execute(
                 f"DELETE FROM `ans_daily_price_stats` WHERE `product_id` IN ({placeholders})",
-                test_pids,
-            )
-            cur.execute(
-                f"DELETE FROM `ans_weekly_price_stats` WHERE `product_id` IN ({placeholders})",
                 test_pids,
             )
             # Staging children

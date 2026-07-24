@@ -103,7 +103,7 @@ def check_layer_consistency(settings: MySQLSettings) -> LayerConsistencyResult:
 
     체크 항목:
         1. Raw → Staging 손실률 > 10%: 파싱/이상치 제외로 과도한 드롭 발생
-        2. ans_product_stats 누락: analytics 스텝 미실행 또는 버그
+        2. ans_daily_price_stats 누락: analytics 스텝 미실행 또는 버그
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
@@ -119,7 +119,7 @@ def check_layer_consistency(settings: MySQLSettings) -> LayerConsistencyResult:
         row = cur.fetchone()
         raw_count, staging_count = int(row[0]), int(row[1])
 
-        # 2. Analytics 미집계 상품 (price_history는 있지만 product_stats에 없는 상품)
+        # 2. Analytics 미집계 상품 (price_history는 있지만 daily_price_stats에 없는 상품)
         # price_history 없는 신규 미크롤링 상품은 정상이므로 제외
         cur.execute("""
             SELECT COUNT(*)
@@ -129,8 +129,8 @@ def check_layer_consistency(settings: MySQLSettings) -> LayerConsistencyResult:
                 WHERE ph.`product_id` = p.`product_id`
             )
             AND NOT EXISTS (
-                SELECT 1 FROM `ans_product_stats` ps
-                WHERE ps.`product_id` = p.`product_id`
+                SELECT 1 FROM `ans_daily_price_stats` ds
+                WHERE ds.`product_id` = p.`product_id`
             )
         """)
         missing_analytics = int(cur.fetchone()[0])

@@ -63,11 +63,11 @@ def test_full_pipeline_data_flows_through_all_layers(mysql_settings, mysql_conn)
 
     # ANALYTICS 확인
     cur.execute("""
-        SELECT COUNT(*) FROM `ans_product_stats` ps
-        JOIN `stg_products` p ON ps.`product_id` = p.`product_id`
+        SELECT COUNT(*) FROM `ans_daily_price_stats` ds
+        JOIN `stg_products` p ON ds.`product_id` = p.`product_id`
         WHERE p.`product_name` = %s
     """, (name,))
-    assert cur.fetchone()[0] == 1, "ans_product_stats 데이터 없음"
+    assert cur.fetchone()[0] == 1, "ans_daily_price_stats 데이터 없음"
 
     cur.close()
 
@@ -93,7 +93,10 @@ def test_full_pipeline_price_change_detected(mysql_settings, mysql_conn):
         SELECT a.`alert_type`, ps.`min_price_ever`, ps.`max_price_ever`
         FROM `stg_price_alerts` a
         JOIN `stg_products` p ON a.`product_id` = p.`product_id`
-        JOIN `ans_product_stats` ps ON ps.`product_id` = p.`product_id`
+        JOIN (
+            SELECT `product_id`, MIN(`min_price`) AS `min_price_ever`, MAX(`max_price`) AS `max_price_ever`
+            FROM `ans_daily_price_stats` GROUP BY `product_id`
+        ) ps ON ps.`product_id` = p.`product_id`
         WHERE p.`product_name` = %s
     """, (name,))
     row = cur.fetchone()

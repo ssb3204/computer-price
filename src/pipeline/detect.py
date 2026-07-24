@@ -34,6 +34,13 @@ def detect_changes(settings: MySQLSettings) -> int:
                     ) AS rn
                 FROM `stg_price_history`
             ),
+            product_stats AS (
+                -- 전체기간 최저/최고가를 ans_daily_price_stats(일별)에서 즉석 집계.
+                -- 실체 테이블(ans_product_stats)을 따로 안 두는 이유: §benchmark 20260724
+                -- (LAG() 스캔이 이미 지배적 비용이라 즉석 집계 오버헤드가 미미함)
+                SELECT `product_id`, MIN(`min_price`) AS `min_price_ever`, MAX(`max_price`) AS `max_price_ever`
+                FROM `ans_daily_price_stats` GROUP BY `product_id`
+            ),
             candidates AS (
                 SELECT
                     r.`product_id`,
@@ -47,7 +54,7 @@ def detect_changes(settings: MySQLSettings) -> int:
                     ps.`min_price_ever`,
                     ps.`max_price_ever`
                 FROM ranked r
-                LEFT JOIN `ans_product_stats` ps ON r.`product_id` = ps.`product_id`
+                LEFT JOIN product_stats ps ON r.`product_id` = ps.`product_id`
                 WHERE r.rn = 1
                   AND r.prev_price IS NOT NULL
                   AND r.`price` != r.prev_price

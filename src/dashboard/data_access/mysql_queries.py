@@ -61,8 +61,9 @@ def get_summary_stats(conn: Connection) -> dict:
 def get_product_stats(conn: Connection) -> pd.DataFrame:
     """WATCHLIST 활성 상품의 전체 기간 통계.
 
-    ans_product_stats에 아직 집계되지 않은 신규 상품도 포함하기 위해
-    stg_products를 기준으로 LEFT JOIN한다.
+    ans_daily_price_stats(일별)를 상품 단위로 즉석 GROUP BY 해서 전체기간 통계를 구한다
+    (실체 테이블을 따로 두지 않음 — §benchmark 20260724). 아직 집계되지 않은
+    신규 상품도 포함하기 위해 stg_products를 기준으로 LEFT JOIN한다.
     """
     sql = f"""
         SELECT
@@ -78,7 +79,17 @@ def get_product_stats(conn: Connection) -> pd.DataFrame:
             ps.`last_crawled_at`,
             COALESCE(ps.`total_records`, 1)            AS total_records
         FROM `stg_products` p
-        LEFT JOIN `ans_product_stats` ps ON ps.`product_id` = p.`product_id`
+        LEFT JOIN (
+            SELECT `product_id`,
+                SUM(`avg_price` * `record_count`) / SUM(`record_count`) AS `avg_price`,
+                MIN(`min_price`)        AS `min_price_ever`,
+                MAX(`max_price`)        AS `max_price_ever`,
+                MIN(`first_crawled_at`) AS `first_crawled_at`,
+                MAX(`last_crawled_at`)  AS `last_crawled_at`,
+                SUM(`record_count`)     AS `total_records`
+            FROM `ans_daily_price_stats`
+            GROUP BY `product_id`
+        ) ps ON ps.`product_id` = p.`product_id`
         LEFT JOIN `stg_latest_prices` lp ON lp.`product_id` = p.`product_id`
         WHERE {_WATCHLIST_EXISTS}
         ORDER BY p.`category`, p.`product_name`

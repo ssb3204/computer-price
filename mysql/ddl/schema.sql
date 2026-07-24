@@ -114,45 +114,22 @@ CREATE TABLE IF NOT EXISTS `stg_watchlist` (
 --  LAYER 3: ANALYTICS — 시각화/분석용 집계
 -- ─────────────────────────────────────────────────────
 
--- 일별 집계. analytics.py가 UPSERT (GROUP BY product_id, DATE(crawled_at)).
+-- 일별 집계(유일한 ans_ 실체 테이블). analytics.py가 UPSERT (GROUP BY product_id, DATE(crawled_at)).
+-- 주별/월별/전체기간 통계는 이 테이블을 즉석 GROUP BY(record_count 가중평균)해서 구한다 —
+-- 별도 테이블로 미리 만들어두지 않는다(데이터량이 적어 즉석 계산 비용이 무시할 수준, §benchmark 20260724).
+-- first_crawled_at/last_crawled_at 은 해당 날짜 안에서의 최초/최근 크롤링 시각(정밀도 유지용).
 CREATE TABLE IF NOT EXISTS `ans_daily_price_stats` (
-    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
-    `product_id`   BIGINT       NOT NULL,
-    `price_date`   DATE         NOT NULL,
-    `min_price`    BIGINT       NOT NULL,
-    `max_price`    BIGINT       NOT NULL,
-    `avg_price`    DECIMAL(12,2) NOT NULL,
-    `record_count` BIGINT       NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uq_daily_price_stats` (`product_id`, `price_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- 주별 집계. week_start = 월요일 시작(§7-3). analytics.py가 UPSERT.
-CREATE TABLE IF NOT EXISTS `ans_weekly_price_stats` (
-    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
-    `product_id`   BIGINT       NOT NULL,
-    `week_start`   DATE         NOT NULL,
-    `min_price`    BIGINT       NOT NULL,
-    `max_price`    BIGINT       NOT NULL,
-    `avg_price`    DECIMAL(12,2) NOT NULL,
-    `record_count` BIGINT       NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uq_weekly_price_stats` (`product_id`, `week_start`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- 상품 전기간 통계. analytics.py가 UPSERT (GROUP BY product_id). detect가 읽음.
-CREATE TABLE IF NOT EXISTS `ans_product_stats` (
-    `product_id`       BIGINT       NOT NULL,                  -- 자연키=대리키(PK), FK → stg_products
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+    `product_id`       BIGINT       NOT NULL,
+    `price_date`       DATE         NOT NULL,
+    `min_price`        BIGINT       NOT NULL,
+    `max_price`        BIGINT       NOT NULL,
     `avg_price`        DECIMAL(12,2) NOT NULL,
-    `min_price_ever`   BIGINT       NOT NULL,
-    `max_price_ever`   BIGINT       NOT NULL,
+    `record_count`     BIGINT       NOT NULL,
     `first_crawled_at` DATETIME     NOT NULL,
     `last_crawled_at`  DATETIME     NOT NULL,
-    `total_records`    BIGINT       NOT NULL,
-    `updated_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`product_id`),
-    CONSTRAINT `fk_product_stats_product`
-        FOREIGN KEY (`product_id`) REFERENCES `stg_products` (`product_id`)
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_daily_price_stats` (`product_id`, `price_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
