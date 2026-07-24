@@ -13,7 +13,7 @@ model: opus
 | 레이어 | 담당 에이전트 | 경로 |
 |--------|-------------|------|
 | 크롤러 | crawler-agent | src/crawlers/ |
-| Snowflake 파이프라인 | pipeline-agent | src/pipeline/, src/airflow_dags/ |
+| MySQL 파이프라인 | pipeline-agent | src/pipeline/, src/airflow_dags/ |
 | Dash 대시보드 | dashboard-agent | src/dashboard/ |
 | 공통 모델/설정 | 영향받는 레이어 에이전트 | src/common/ |
 

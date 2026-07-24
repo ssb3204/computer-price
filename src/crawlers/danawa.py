@@ -1,22 +1,21 @@
 """Crawler for shop.danawa.com — pcode 기반 검색.
 
-크롤링 대상은 Snowflake WATCHLIST 테이블에서 동적으로 로드.
+크롤링 대상은 stg_watchlist 테이블에서 동적으로 로드.
 """
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import requests
-
 from bs4 import BeautifulSoup, Tag
-from snowflake.connector import SnowflakeConnection
+from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import BaseCrawler, DEFAULT_HEADERS
+from src.crawlers.base import DEFAULT_HEADERS, BaseCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +65,26 @@ def _extract_url(item: Tag) -> str:
             if netloc in ALLOWED_DOMAINS or any(netloc.endswith("." + d) for d in ALLOWED_DOMAINS):
                 return href
     return ""
+
+
+# 검색 URL에 &cate= 를 붙이는 건 실제로 필터링 효과가 없다(실측 확인됨).
+# 대신 각 상품 링크 자체에 붙은 cate= 코드로 사후 필터링한다.
+# 완제PC/베어본 등은 다른 카테고리 코드(예: 11316681, 112756)를 가지므로 자연히 제외된다.
+_CATEGORY_TO_CATE: dict[str, set[str]] = {
+    "CPU": {"113990", "113973"},  # AMD, Intel
+    "GPU": {"112753"},
+    "RAM": {"112752"},
+    "SSD": {"112760"},
+}
+
+
+def _extract_cate(item: Tag) -> str | None:
+    link = item.select_one(".prod_name a[href]")
+    if link:
+        match = re.search(r"cate=(\d+)", link.get("href", ""))
+        if match:
+            return match.group(1)
+    return None
 
 
 @dataclass(frozen=True)
@@ -125,8 +144,15 @@ def enrich_names_from_detail(results: list[SearchResult]) -> list[SearchResult]:
     ]
 
 
+MAX_SEARCH_PAGES = 5
+
+
 def search_products(query: str, max_results: int = 10, category: str | None = None) -> list[SearchResult]:
     """제품명으로 다나와를 검색해 매칭되는 상품 목록을 반환한다.
+
+    다나와 검색 결과는 여러 페이지(&page=N)로 나뉘어 있어, 1페이지에서
+    max_results를 못 채우면 다음 페이지를 이어서 조회한다(최대 MAX_SEARCH_PAGES).
+    페이지에 li.prod_item 자체가 없으면(마지막 페이지 도달) 순회를 멈춘다.
 
     Args:
         query: 검색어 (예: "RTX 5080", "라이젠 7800X3D")
@@ -139,29 +165,38 @@ def search_products(query: str, max_results: int = 10, category: str | None = No
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
 
-    url = f"{SEARCH_URL}?query={query}&tab=goods"
-    try:
-        resp = session.get(url, timeout=30)
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-    except requests.RequestException as e:
-        logger.error("search_products 요청 실패: %s", e)
-        return []
+    allowed_cates = _CATEGORY_TO_CATE.get(category.upper()) if category else None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
     results: list[SearchResult] = []
 
-    for item in soup.select("li.prod_item"):
-        if not _is_real_product(item):
-            continue
-        pcode = _extract_pcode(item)
-        name = _extract_name(item)
-        if pcode is None or name is None:
-            continue
-        product_url = _extract_url(item) or f"{PRODUCT_BASE}{pcode}"
-        results.append(SearchResult(pcode=pcode, product_name=name, url=product_url))
-        if len(results) >= max_results:
+    for page in range(1, MAX_SEARCH_PAGES + 1):
+        url = f"{SEARCH_URL}?query={query}&tab=goods&page={page}"
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+        except requests.RequestException as e:
+            logger.error("search_products 요청 실패(page=%d): %s", page, e)
             break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        items = soup.select("li.prod_item")
+        if not items:
+            break
+
+        for item in items:
+            if not _is_real_product(item):
+                continue
+            if allowed_cates is not None and _extract_cate(item) not in allowed_cates:
+                continue
+            pcode = _extract_pcode(item)
+            name = _extract_name(item)
+            if pcode is None or name is None:
+                continue
+            product_url = _extract_url(item) or f"{PRODUCT_BASE}{pcode}"
+            results.append(SearchResult(pcode=pcode, product_name=name, url=product_url))
+            if len(results) >= max_results:
+                return results
 
     return results
 
@@ -182,7 +217,7 @@ def crawl_single(
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for item in soup.select("li.prod_item"):
         if not _is_real_product(item):
             continue
@@ -203,7 +238,7 @@ def crawl_single(
 
 
 class DanawaCrawler(BaseCrawler):
-    def __init__(self, conn: SnowflakeConnection) -> None:
+    def __init__(self, conn: Connection) -> None:
         super().__init__()
         self._conn = conn
 
@@ -215,10 +250,9 @@ class DanawaCrawler(BaseCrawler):
         """WATCHLIST에서 활성 크롤링 대상 로드."""
         cur = self._conn.cursor()
         try:
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
-                "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '다나와'"
+                "SELECT `query`, `pcode`, `category`, `brand` "
+                "FROM `stg_watchlist` WHERE `is_active` = 1 AND `site` = '다나와'"
             )
             return [
                 {"query": row[0], "pcode": row[1], "category": row[2], "brand": row[3]}
@@ -238,7 +272,7 @@ class DanawaCrawler(BaseCrawler):
             if html is None:
                 continue
             soup = BeautifulSoup(html, "html.parser")
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             for item in soup.select("li.prod_item"):
                 if not _is_real_product(item):

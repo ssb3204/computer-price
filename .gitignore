@@ -21,6 +21,10 @@ env/
 # Environment
 .env
 
+# Local scratch / IDE-local settings
+tmp/
+.claude/settings.local.json
+
 # Testing
 .pytest_cache/
 .coverage

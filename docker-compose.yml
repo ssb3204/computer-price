@@ -11,10 +11,40 @@ services:
     volumes:
       - ./src:/app/src
     environment:
-      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
-      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
-      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
-      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-COMPUTE_WH}
-      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-COMPUTER_PRICE}
+      # 컨테이너 안에서 localhost 는 컨테이너 자신을 가리키므로,
+      # .env 에 MYSQL_HOST 를 지정하지 않으면 host.docker.internal(로컬 호스트)을 기본값으로 사용.
+      # Oracle VM 등 원격 MySQL 로 전환하려면 .env 에 MYSQL_HOST=<원격 IP> 만 추가하면 됨.
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-price_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-computer_price}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # --- FastAPI (users API) ---
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    ports:
+      - "8001:8000"          # 호스트 8001 -> 컨테이너 8000. 호스트 8000은 다른 프로젝트(code-visual-backend)가 점유 중이라 회피
+    volumes:
+      - ./src:/app/src       # 코드 수정 즉시 반영 (dashboard 와 동일 방식)
+    environment:
+      # 컨테이너 안에서 localhost 는 컨테이너 자신을 가리키므로,
+      # .env 에 MYSQL_HOST 를 지정하지 않으면 host.docker.internal(로컬 호스트)을 기본값으로 사용.
+      # Oracle VM 등 원격 MySQL 로 전환하려면 .env 에 MYSQL_HOST=<원격 IP> 만 추가하면 됨.
+      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-price_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}   # .env 의 MYSQL_PASSWORD 를 주입
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-computer_price}
+    extra_hosts:
+      # host.docker.internal 이름을 호스트 게이트웨이로 매핑.
+      # Docker Desktop(Windows/Mac)은 기본 제공하지만, 명시해두면 환경 무관하게 안전.
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

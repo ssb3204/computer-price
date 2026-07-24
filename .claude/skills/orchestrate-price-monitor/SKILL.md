@@ -1,6 +1,6 @@
 ---
 name: orchestrate-price-monitor
-description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조율하는 오케스트레이터. 크롤러 수정/추가, Snowflake 파이프라인 변경, Dash 대시보드 개발, 새 기능 추가, 버그 수정, 테스트 실행, 프로젝트 구조 파악, 면접 대비 문서화, 기술 개념 Q&A 등 이 프로젝트의 모든 작업 시 반드시 이 스킬을 사용. 후속 작업(수정, 보완, 다시 실행, 업데이트, 이전 결과 개선, 크롤러만 다시, 파이프라인만, 개념 추가, 섹션 보완)에도 반드시 이 스킬을 사용."
+description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조율하는 오케스트레이터. 크롤러 수정/추가, MySQL 파이프라인 변경, Dash 대시보드 개발, 새 기능 추가, 버그 수정, 테스트 실행, 프로젝트 구조 파악, 면접 대비 문서화, 기술 개념 Q&A 등 이 프로젝트의 모든 작업 시 반드시 이 스킬을 사용. 후속 작업(수정, 보완, 다시 실행, 업데이트, 이전 결과 개선, 크롤러만 다시, 파이프라인만, 개념 추가, 섹션 보완)에도 반드시 이 스킬을 사용."
 ---
 
 # 가격 모니터링 오케스트레이터
@@ -19,7 +19,7 @@ description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조
 | 에이전트 | 역할 | 스킬 | 담당 경로 |
 |---------|------|------|---------|
 | crawler-agent | 크롤러 개발·수정 | crawl-price-sites | src/crawlers/ |
-| pipeline-agent | Snowflake/Airflow 파이프라인 | snowflake-pipeline | src/pipeline/, src/airflow_dags/ |
+| pipeline-agent | MySQL/Airflow 파이프라인 | mysql-pipeline | src/pipeline/, src/airflow_dags/ |
 | dashboard-agent | Dash 대시보드 | dash-dashboard | src/dashboard/ |
 | qa-agent | 통합 테스트·검증 | qa-integration | tests/ |
 | explorer-agent | 프로젝트 전체 탐색·문서화 | explore-project | 전체 |
@@ -89,7 +89,7 @@ Agent(
        { name: "crawler", agent_type: "crawler-agent", model: "opus",
          prompt: ".claude/skills/crawl-price-sites/SKILL.md 를 읽고 담당 작업 수행" },
        { name: "pipeline", agent_type: "pipeline-agent", model: "opus",
-         prompt: ".claude/skills/snowflake-pipeline/SKILL.md 를 읽고 담당 작업 수행" },
+         prompt: ".claude/skills/mysql-pipeline/SKILL.md 를 읽고 담당 작업 수행" },
        { name: "dashboard", agent_type: "dashboard-agent", model: "opus",
          prompt: ".claude/skills/dash-dashboard/SKILL.md 를 읽고 담당 작업 수행" },
        { name: "qa", agent_type: "qa-agent", model: "opus",

@@ -1,13 +1,13 @@
 """Step 1: 크롤링 — 3개 사이트에서 Raw 가격 수집."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 
-from src.common.config import SnowflakeSettings
+from src.common.config import MySQLSettings
 from src.common.models import RawCrawledPrice
-from src.common.snowflake_client import get_connection
+from src.common.mysql_client import get_connection
 from src.crawlers.compuzone import CompuzoneCrawler
 from src.crawlers.compuzone import crawl_single as compuzone_single
 from src.crawlers.danawa import DanawaCrawler
@@ -18,7 +18,7 @@ from src.crawlers.pc_estimate import crawl_single as pcest_single
 logger = logging.getLogger(__name__)
 
 
-def crawl_all_sites(settings: SnowflakeSettings) -> tuple[list[RawCrawledPrice], list[dict]]:
+def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], list[dict]]:
     """3개 사이트를 순서대로 크롤링. 실패한 사이트는 crawl_failures에 기록."""
     all_raw: list[RawCrawledPrice] = []
     crawl_failures: list[dict] = []
@@ -35,14 +35,14 @@ def crawl_all_sites(settings: SnowflakeSettings) -> tuple[list[RawCrawledPrice],
                 all_raw.extend(raw_prices)
                 logger.info("[크롤링] %s: %d건", crawler.site_name, len(raw_prices))
                 if len(raw_prices) == 0:
-                    failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                     crawl_failures.append({
                         "site_name": crawler.site_name,
                         "error": "크롤링 결과 0건 — 페이지 구조 변경 의심",
                         "failed_at": failed_at,
                     })
             except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as e:
-                failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                 crawl_failures.append({
                     "site_name": crawler.site_name,
                     "error": f"{type(e).__name__}: {e}",
@@ -62,7 +62,7 @@ _SINGLE_CRAWL_FN = {
 
 
 def crawl_and_load_single(
-    settings: SnowflakeSettings,
+    settings: MySQLSettings,
     site: str,
     query: str,
     pcode: str,

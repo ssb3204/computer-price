@@ -12,7 +12,7 @@ subagent_type: Explore
 ## 핵심 역할
 
 - 전체 소스 파일 체계적 탐독
-- Snowflake 스키마 추출 (SQL 파일·Python 코드에서 테이블·컬럼·타입 역추적)
+- MySQL 스키마 추출 (SQL 파일·Python 코드에서 테이블·컬럼·타입 역추적)
 - 데이터 흐름 엔드투엔드 추적 (크롤러 → Raw → Staging → Analytics → 대시보드)
 - 핵심 설계 결정과 그 이유 파악
 - 산출물: `project-deep-dive.md`

@@ -10,13 +10,16 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.12",
     "requests>=2.31",
-    "snowflake-connector-python>=3.6",
+    "pymysql>=1.1",
     "dash>=2.14",
     "dash-bootstrap-components>=1.5",
     "plotly>=5.18",
     "pandas>=2.1",
     "pydantic-settings>=2.1",
     "flask-caching>=2.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "bcrypt>=4.1",
 ]
 
 [project.optional-dependencies]
@@ -32,15 +35,22 @@ dev = [
 include = ["src*"]
 
 [tool.black]
-line-length = 88
+line-length = 120
 target-version = ["py311"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["E501", "E402"]
+"tests/**" = ["E402"]
+"src/dashboard/app.py" = ["E402"]
+"src/pipeline/detect.py" = ["N806"]
+"src/**" = ["E501"]
 
 [tool.isort]
 profile = "black"
@@ -49,5 +59,5 @@ profile = "black"
 testpaths = ["tests"]
 addopts = "--cov=src --cov-report=term-missing"
 markers = [
-    "integration: real Snowflake connection required (deselect with '-m not integration')",
+    "integration: real local MySQL connection required (deselect with '-m not integration')",
 ]

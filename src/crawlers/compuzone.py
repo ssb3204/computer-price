@@ -1,6 +1,6 @@
 """Crawler for compuzone.co.kr — WATCHLIST 기반 크롤링.
 
-크롤링 대상은 Snowflake WATCHLIST 테이블에서 동적으로 로드.
+크롤링 대상은 stg_watchlist 테이블에서 동적으로 로드.
 카테고리 AJAX 페이지를 페이지네이션하여 ProductNo로 특정 상품을 찾아 가격 수집.
 """
 
@@ -8,11 +8,11 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 from bs4 import BeautifulSoup
-from snowflake.connector import SnowflakeConnection
+from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
 from src.crawlers.base import BaseCrawler
@@ -207,7 +207,7 @@ def crawl_single(
     """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
     medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(category.upper(), "")
     session = requests.Session()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 1차: 카테고리 목록에서 product_no 매칭 (crawl_raw와 동일한 주 경로)
     if medium_div_no:
@@ -302,7 +302,7 @@ def crawl_single(
 
 
 class CompuzoneCrawler(BaseCrawler):
-    def __init__(self, conn: SnowflakeConnection) -> None:
+    def __init__(self, conn: Connection) -> None:
         super().__init__()
         self._conn = conn
 
@@ -314,10 +314,9 @@ class CompuzoneCrawler(BaseCrawler):
         """WATCHLIST에서 compuzone 활성 크롤링 대상 로드."""
         cur = self._conn.cursor()
         try:
-            cur.execute("USE DATABASE COMPUTER_PRICE")
             cur.execute(
-                "SELECT QUERY, PCODE, CATEGORY, BRAND "
-                "FROM STAGING.WATCHLIST WHERE IS_ACTIVE = TRUE AND SITE = '컴퓨존'"
+                "SELECT `query`, `pcode`, `category`, `brand` "
+                "FROM `stg_watchlist` WHERE `is_active` = 1 AND `site` = '컴퓨존'"
             )
             return [
                 {"query": row[0], "product_no": row[1], "category": row[2], "brand": row[3]}
@@ -364,7 +363,7 @@ class CompuzoneCrawler(BaseCrawler):
             if not items:
                 break
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for item in items:
                 pno = item.get("id", "").replace("li-pno-", "")
                 if pno != target["product_no"]:
@@ -410,7 +409,7 @@ class CompuzoneCrawler(BaseCrawler):
                 if not items:
                     break
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for item in items:
                     pno = item.get("id", "").replace("li-pno-", "")
                     if pno != target["product_no"]:
@@ -462,7 +461,7 @@ class CompuzoneCrawler(BaseCrawler):
                             site="compuzone", category=target["category"],
                             product_name=name, price_text=price_str,
                             brand=target["brand"], url=product_url,
-                            crawled_at=datetime.now(timezone.utc),
+                            crawled_at=datetime.now(UTC),
                         ))
                         logger.info(
                             "상세 페이지 fallback 성공: %s (ProductNo=%s)",

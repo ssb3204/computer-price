@@ -1,4 +1,4 @@
-"""Dash web application — Snowflake 연동 대시보드."""
+"""Dash web application — MySQL 연동 대시보드."""
 
 import logging
 import os

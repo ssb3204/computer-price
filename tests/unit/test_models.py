@@ -1,8 +1,9 @@
 """Tests for immutable data models."""
 
-import pytest
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+import pytest
 
 from src.common.models import RawCrawledPrice
 
@@ -16,7 +17,7 @@ def sample_raw_crawled_price():
         price_text="450,000원",
         brand="AMD",
         url="https://shop.danawa.com/product/12345",
-        crawled_at=datetime(2026, 3, 19, 6, 0, 0, tzinfo=timezone.utc),
+        crawled_at=datetime(2026, 3, 19, 6, 0, 0, tzinfo=UTC),
     )
 
 

@@ -3,17 +3,18 @@
 GitHub Actions 또는 로컬에서 직접 실행:
     python run_pipeline.py
 
-환경변수 필요:
-    SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD
-    SNOWFLAKE_WAREHOUSE (기본값: COMPUTE_WH)
-    SNOWFLAKE_DATABASE  (기본값: COMPUTER_PRICE)
-    SLACK_WEBHOOK_URL   (선택, 크롤링 실패 시 알림)
+환경변수 필요 (MYSQL_ 접두사, .env 파일 또는 환경변수로 주입):
+    MYSQL_HOST      (기본값: localhost)
+    MYSQL_PORT      (기본값: 3306)
+    MYSQL_USER      (기본값: price_app)
+    MYSQL_PASSWORD  (필수)
+    MYSQL_DATABASE  (기본값: computer_price)
+    SLACK_WEBHOOK_URL (선택, 크롤링 실패 시 알림)
 """
-
 import logging
 import sys
 
-from src.common.config import SnowflakeSettings
+from src.common.config import MySQLSettings
 from src.pipeline.analytics import aggregate_analytics
 from src.pipeline.crawl import crawl_all_sites
 from src.pipeline.detect import detect_changes
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> int:
     logger.info("=== 파이프라인 시작 ===")
-    settings = SnowflakeSettings()
+    settings = MySQLSettings()
 
     # Step 1: 크롤링
     try:
@@ -95,7 +96,6 @@ def main() -> int:
     if len(crawl_failures) == 3:
         logger.error("모든 사이트 크롤링 실패 — exit 1")
         return 1
-
     return 0
 
 

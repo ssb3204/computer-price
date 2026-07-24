@@ -1,15 +1,15 @@
-"""Step 4: 변경 감지 — 가격 변동을 탐지해 STAGING.PRICE_ALERTS에 기록."""
+"""Step 4: 변경 감지 — 가격 변동을 탐지해 stg_price_alerts에 기록."""
 
 import logging
 
-from src.common.config import SnowflakeSettings
-from src.common.snowflake_client import get_connection
+from src.common.config import MySQLSettings
+from src.common.mysql_client import get_connection
 
 logger = logging.getLogger(__name__)
 
 
-def detect_changes(settings: SnowflakeSettings) -> int:
-    """LAG() 윈도우 함수로 직전 가격 대비 변동을 탐지, PRICE_ALERTS에 INSERT."""
+def detect_changes(settings: MySQLSettings) -> int:
+    """LAG() 윈도우 함수로 직전 가격 대비 변동을 탐지, stg_price_alerts에 INSERT."""
     MIN_CHANGE_PCT = 1.0
     MAX_CHANGE_PCT = 70.0   # 70% 초과 단일 변동은 데이터 이상치로 간주
     PRICE_DROP_PCT = -5.0
@@ -18,59 +18,66 @@ def detect_changes(settings: SnowflakeSettings) -> int:
     with get_connection(settings) as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO STAGING.PRICE_ALERTS
-                (PRODUCT_ID, DAILY_PRICE_ID, ALERT_TYPE, OLD_PRICE, NEW_PRICE, CHANGE_PCT)
+            INSERT INTO `stg_price_alerts`
+                (`product_id`, `daily_price_id`, `alert_type`, `old_price`, `new_price`, `change_pct`)
             WITH ranked AS (
                 SELECT
-                    PRODUCT_ID,
-                    ID AS DAILY_PRICE_ID,
-                    PRICE,
-                    CRAWLED_AT,
-                    LAG(PRICE) OVER (
-                        PARTITION BY PRODUCT_ID ORDER BY CRAWLED_AT
+                    `product_id`,
+                    `id` AS daily_price_id,
+                    `price`,
+                    `crawled_at`,
+                    LAG(`price`) OVER (
+                        PARTITION BY `product_id` ORDER BY `crawled_at`
                     ) AS prev_price,
                     ROW_NUMBER() OVER (
-                        PARTITION BY PRODUCT_ID ORDER BY CRAWLED_AT DESC
+                        PARTITION BY `product_id` ORDER BY `crawled_at` DESC
                     ) AS rn
-                FROM STAGING.PRICE_HISTORY
+                FROM `stg_price_history`
+            ),
+            product_stats AS (
+                -- 전체기간 최저/최고가를 ans_daily_price_stats(일별)에서 즉석 집계.
+                -- 실체 테이블(ans_product_stats)을 따로 안 두는 이유: §benchmark 20260724
+                -- (LAG() 스캔이 이미 지배적 비용이라 즉석 집계 오버헤드가 미미함)
+                SELECT `product_id`, MIN(`min_price`) AS `min_price_ever`, MAX(`max_price`) AS `max_price_ever`
+                FROM `ans_daily_price_stats` GROUP BY `product_id`
             ),
             candidates AS (
                 SELECT
-                    r.PRODUCT_ID,
-                    r.DAILY_PRICE_ID,
-                    r.PRICE AS new_price,
+                    r.`product_id`,
+                    r.daily_price_id,
+                    r.`price` AS new_price,
                     r.prev_price AS old_price,
                     CASE WHEN r.prev_price > 0
-                         THEN ROUND((r.PRICE - r.prev_price) / r.prev_price * 100, 4)
+                         THEN ROUND((r.`price` - r.prev_price) / r.prev_price * 100, 4)
                          ELSE NULL
                     END AS change_pct,
-                    ps.MIN_PRICE_EVER,
-                    ps.MAX_PRICE_EVER
+                    ps.`min_price_ever`,
+                    ps.`max_price_ever`
                 FROM ranked r
-                LEFT JOIN ANALYTICS.PRODUCT_STATS ps ON r.PRODUCT_ID = ps.PRODUCT_ID
+                LEFT JOIN product_stats ps ON r.`product_id` = ps.`product_id`
                 WHERE r.rn = 1
                   AND r.prev_price IS NOT NULL
-                  AND r.PRICE != r.prev_price
-                  AND ABS((r.PRICE - r.prev_price) / r.prev_price * 100) >= %s
-                  AND ABS((r.PRICE - r.prev_price) / r.prev_price * 100) <= %s
+                  AND r.`price` != r.prev_price
+                  AND ABS((r.`price` - r.prev_price) / r.prev_price * 100) >= %s
+                  AND ABS((r.`price` - r.prev_price) / r.prev_price * 100) <= %s
                   AND NOT EXISTS (
-                      SELECT 1 FROM STAGING.PRICE_ALERTS a
-                      WHERE a.DAILY_PRICE_ID = r.DAILY_PRICE_ID
+                      SELECT 1 FROM `stg_price_alerts` a
+                      WHERE a.`daily_price_id` = r.daily_price_id
                   )
             )
             SELECT
-                PRODUCT_ID, DAILY_PRICE_ID,
+                `product_id`, daily_price_id,
                 CASE
-                    WHEN MIN_PRICE_EVER IS NOT NULL AND new_price < MIN_PRICE_EVER THEN 'NEW_LOW'
-                    WHEN MAX_PRICE_EVER IS NOT NULL AND new_price > MAX_PRICE_EVER THEN 'NEW_HIGH'
+                    WHEN `min_price_ever` IS NOT NULL AND new_price < `min_price_ever` THEN 'NEW_LOW'
+                    WHEN `max_price_ever` IS NOT NULL AND new_price > `max_price_ever` THEN 'NEW_HIGH'
                     WHEN change_pct <= %s THEN 'PRICE_DROP'
                     WHEN change_pct >= %s THEN 'PRICE_SPIKE'
                 END AS alert_type,
                 old_price, new_price, change_pct
             FROM candidates
             WHERE CASE
-                    WHEN MIN_PRICE_EVER IS NOT NULL AND new_price < MIN_PRICE_EVER THEN 'NEW_LOW'
-                    WHEN MAX_PRICE_EVER IS NOT NULL AND new_price > MAX_PRICE_EVER THEN 'NEW_HIGH'
+                    WHEN `min_price_ever` IS NOT NULL AND new_price < `min_price_ever` THEN 'NEW_LOW'
+                    WHEN `max_price_ever` IS NOT NULL AND new_price > `max_price_ever` THEN 'NEW_HIGH'
                     WHEN change_pct <= %s THEN 'PRICE_DROP'
                     WHEN change_pct >= %s THEN 'PRICE_SPIKE'
                   END IS NOT NULL

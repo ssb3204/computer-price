@@ -1,40 +1,36 @@
 name: 가격 크롤링 파이프라인
 
+# MySQL 이 Oracle Cloud VM(computer-price-vm, 공인 IP)의 Docker 컨테이너로 이전되어
+# GitHub 클라우드 러너(ubuntu-latest)에서도 인터넷을 통해 접속 가능해졌다.
+# repo secrets(MYSQL_HOST 등)로 VM MySQL 접속 정보를 주입한다.
+#
+# 00/05/10/15시 KST(=UTC 15/20/01/06시) 4회/일 자동 실행.
+
 on:
+  workflow_dispatch:  # 수동 트리거
   schedule:
-    # 00:00, 05:00, 10:00, 15:00 KST (= 15:00, 20:00, 01:00, 06:00 UTC)
-    - cron: "0 15 * * *"
-    - cron: "0 20 * * *"
-    - cron: "0 1  * * *"
-    - cron: "0 6  * * *"
-  workflow_dispatch:  # 수동 실행 허용
+    - cron: "0 1,6,15,20 * * *"  # 10:00/15:00/00:00/05:00 KST
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-
       - name: Python 3.11 설정
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
       - name: 의존성 설치
         run: pip install -e .
-
       - name: 파이프라인 실행
         env:
-          SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE:  ${{ secrets.SNOWFLAKE_DATABASE }}
-          SLACK_WEBHOOK_URL:   ${{ secrets.SLACK_WEBHOOK_URL }}
+          MYSQL_HOST:      ${{ secrets.MYSQL_HOST }}
+          MYSQL_PORT:      ${{ secrets.MYSQL_PORT }}
+          MYSQL_USER:      ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD:  ${{ secrets.MYSQL_PASSWORD }}
+          MYSQL_DATABASE:  ${{ secrets.MYSQL_DATABASE }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python run_pipeline.py

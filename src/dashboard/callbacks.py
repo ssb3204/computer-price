@@ -3,25 +3,24 @@
 import json
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import dash
-import pandas as pd
 import dash_bootstrap_components as dbc
+import pandas as pd
 import plotly.express as px
 from dash import html
 from dash.dependencies import ALL, Input, Output, State
 
-from src.common.config import SnowflakeSettings
-from src.common.snowflake_client import get_connection
-from src.pipeline.crawl import crawl_and_load_single
+from src.common.config import MySQLSettings
+from src.common.mysql_client import get_connection
 from src.crawlers.compuzone import enrich_names_from_detail as compuzone_enrich
 from src.crawlers.compuzone import search_products as compuzone_search
 from src.crawlers.danawa import enrich_names_from_detail as danawa_enrich
 from src.crawlers.danawa import search_products as danawa_search
 from src.crawlers.pc_estimate import search_products as pcest_search
-from src.dashboard.data_access.snowflake_queries import (
+from src.dashboard.data_access.mysql_queries import (
     add_watch_product,
     get_alerts,
     get_category_price_summary,
@@ -51,20 +50,21 @@ from src.dashboard.layouts.overview import overview_page
 from src.dashboard.layouts.prices import prices_page
 from src.dashboard.layouts.trends import trends_page
 from src.dashboard.layouts.watchlist import watchlist_page
+from src.pipeline.crawl import crawl_and_load_single
 
 logger = logging.getLogger(__name__)
 
-_sf_settings = None
-_sf_lock = threading.Lock()
+_mysql_settings = None
+_mysql_lock = threading.Lock()
 
 
 def _get_conn():
-    global _sf_settings
-    if _sf_settings is None:
-        with _sf_lock:
-            if _sf_settings is None:
-                _sf_settings = SnowflakeSettings()
-    return get_connection(_sf_settings)
+    global _mysql_settings
+    if _mysql_settings is None:
+        with _mysql_lock:
+            if _mysql_settings is None:
+                _mysql_settings = MySQLSettings()
+    return get_connection(_mysql_settings)
 
 
 # ── Button Toggle Helper ──
@@ -99,7 +99,7 @@ def register_callbacks(app, cache):
 
     def _trigger_single_crawl(cache, site, query, pcode, category, brand):
         """백그라운드 스레드로 단일 상품 크롤링 후 캐시 무효화."""
-        settings = SnowflakeSettings()
+        settings = MySQLSettings()
 
         def _run():
             success = crawl_and_load_single(settings, site, query, pcode, category, brand)
@@ -171,7 +171,7 @@ def register_callbacks(app, cache):
             stats = _fetch_summary_stats()
             cat_df = _fetch_category_price_summary()
             prices_df = _fetch_latest_prices_all()
-        except Exception as e:
+        except Exception:
             logger.exception("Overview 데이터 로드 실패")
             err = db_error_ui()
             return err, err, err
@@ -230,7 +230,7 @@ def register_callbacks(app, cache):
     def update_prices_table(category, site):
         try:
             df = _fetch_latest_prices_all()
-        except Exception as e:
+        except Exception:
             logger.exception("가격표 데이터 로드 실패")
             return db_error_ui()
 
@@ -262,7 +262,7 @@ def register_callbacks(app, cache):
     def update_stats(category, site):
         try:
             df = _fetch_product_stats()
-        except Exception as e:
+        except Exception:
             logger.exception("상품 통계 데이터 로드 실패")
             return db_error_ui()
 
@@ -301,7 +301,7 @@ def register_callbacks(app, cache):
 
         try:
             df = _fetch_price_trend(category=category, search=search, days=days if days else None)
-        except Exception as e:
+        except Exception:
             logger.exception("가격 추이 데이터 로드 실패")
             return empty_chart("데이터베이스 연결 실패"), []
 
@@ -380,7 +380,7 @@ def register_callbacks(app, cache):
 
         try:
             df = _fetch_today_crawl_comparison(category=category)
-        except Exception as e:
+        except Exception:
             logger.exception("오늘 크롤링 비교 데이터 로드 실패")
             return [], []
 
@@ -443,7 +443,7 @@ def register_callbacks(app, cache):
     def update_alerts_table(alert_type, category, _):
         try:
             df = _fetch_alerts(alert_type=alert_type, category=category)
-        except Exception as e:
+        except Exception:
             logger.exception("알림 데이터 로드 실패")
             return db_error_ui()
 
@@ -451,7 +451,6 @@ def register_callbacks(app, cache):
             return html.P("알림 없음", className="text-muted")
 
         from datetime import date as date_type
-        import pandas as pd
 
         today = date_type.today()
         yesterday = pd.Timestamp.today().normalize() - pd.Timedelta(days=1)

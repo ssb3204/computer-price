@@ -9,7 +9,6 @@ import pytest
 
 from src.dashboard.helpers import db_error_ui
 
-
 # ── db_error_ui 헬퍼 테스트 ───────────────────────────────────────────────────
 
 
@@ -25,9 +24,9 @@ def test_db_error_ui_default_message():
 
 
 def test_db_error_ui_custom_message():
-    result = db_error_ui("Snowflake timeout")
+    result = db_error_ui("MySQL timeout")
     assert result.color == "danger"
-    assert "Snowflake timeout" in result.children
+    assert "MySQL timeout" in result.children
 
 
 def test_db_error_ui_has_danger_color():
@@ -37,10 +36,8 @@ def test_db_error_ui_has_danger_color():
 
 # ── 콜백 에러 처리 통합 테스트 ────────────────────────────────────────────────
 
-_DUMMY_SF_ENV = {
-    "SNOWFLAKE_ACCOUNT": "dummy",
-    "SNOWFLAKE_USER": "dummy",
-    "SNOWFLAKE_PASSWORD": "dummy",
+_DUMMY_MYSQL_ENV = {
+    "MYSQL_PASSWORD": "dummy",
 }
 
 
@@ -54,10 +51,10 @@ def _get_inner_callback(app, target_output_id: str):
 
 @pytest.fixture(scope="module")
 def dash_app():
-    """Snowflake 더미 env로 콜백 등록한 Dash 앱 (모듈 공유)."""
+    """MySQL 더미 env로 콜백 등록한 Dash 앱 (모듈 공유)."""
     from flask_caching import Cache
 
-    with patch.dict(os.environ, _DUMMY_SF_ENV):
+    with patch.dict(os.environ, _DUMMY_MYSQL_ENV):
         from src.dashboard.callbacks import register_callbacks
 
         app = dash.Dash(__name__, suppress_callback_exceptions=True)

@@ -1,15 +1,15 @@
-"""Step 3: Staging 변환 — Raw 데이터를 정제해 STAGING.PRODUCTS / PRICE_HISTORY에 적재."""
+"""Step 3: Staging 변환 — Raw 데이터를 정제해 stg_products / stg_price_history에 적재."""
 
 import logging
 import re
 
-from src.common.config import SnowflakeSettings
-from src.common.snowflake_client import get_connection
+from src.common.config import MySQLSettings
+from src.common.mysql_client import get_connection
 from src.crawlers.parser_utils import parse_korean_price, validate_price
 
 logger = logging.getLogger(__name__)
 
-# 크롤러 내부 site_name → Snowflake 표시명 매핑
+# 크롤러 내부 site_name → 표시명 매핑
 _SITE_DISPLAY_MAP = {
     "danawa":      "다나와",
     "compuzone":   "컴퓨존",
@@ -17,33 +17,32 @@ _SITE_DISPLAY_MAP = {
 }
 
 
-def transform_staging(settings: SnowflakeSettings) -> int:
-    """RAW.CRAWLED_PRICES_STREAM을 소비해 STAGING.PRODUCTS / PRICE_HISTORY에 변환 적재.
+def transform_staging(settings: MySQLSettings) -> int:
+    """미처리 raw_crawled_prices를 정제해 stg_products / stg_price_history에 적재.
 
-    Stream 소비 방식:
-        CREATE TEMPORARY TABLE AS SELECT FROM stream (DML) → Stream offset 이동
-        → 소비된 레코드는 다음 파이프라인 실행에서 Stream에 나타나지 않음
-        → 실패 레코드도 소비되어 영구 재조회 문제 없음
-    실패 레코드는 RAW.TRANSFORM_FAILURES에 원인과 함께 기록 (감사용).
+    증분 처리(구 Snowflake Stream 대체):
+        stg_price_history.raw_id에 아직 없고, raw_transform_failures에도 없는
+        raw_crawled_prices 행만 '미처리'로 간주해 처리한다(미처리 조인).
+        → 성공 레코드는 price_history.raw_id로, 실패 레코드는 transform_failures로
+          '소비'되어 다음 실행에서 재조회되지 않는다(Stream의 consume-once 재현).
+    실패 레코드는 raw_transform_failures에 원인과 함께 기록(감사용).
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
-        cur.execute("USE SCHEMA RAW")
 
-        # Stream 소비: CREATE TABLE AS SELECT (DML) → Stream offset 이동
-        # APPEND_ONLY Stream이므로 METADATA$ACTION은 항상 'INSERT'
+        # 미처리 조인: price_history에도 transform_failures에도 없는 raw 행만
         cur.execute("""
-            CREATE OR REPLACE TEMPORARY TABLE TEMP_STREAM_DATA AS
-            SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, URL, CRAWLED_AT
-            FROM CRAWLED_PRICES_STREAM
-            WHERE METADATA$ACTION = 'INSERT'
+            SELECT r.`id`, r.`site`, r.`category`, r.`product_name`,
+                   r.`price_text`, r.`url`, r.`crawled_at`
+            FROM `raw_crawled_prices` r
+            LEFT JOIN `stg_price_history` h ON h.`raw_id` = r.`id`
+            WHERE h.`raw_id` IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM `raw_transform_failures` f
+                  WHERE f.`crawled_prices_id` = r.`id`
+              )
         """)
-        cur.execute(
-            "SELECT ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, URL, "
-            "CRAWLED_AT FROM TEMP_STREAM_DATA"
-        )
         raw_rows = cur.fetchall()
-        cur.execute("USE SCHEMA STAGING")
 
         if not raw_rows:
             logger.info("[Staging] 변환할 데이터 없음")
@@ -77,38 +76,34 @@ def transform_staging(settings: SnowflakeSettings) -> int:
         if anomaly_count:
             logger.warning("[Staging] 이상치 총 %d건 제외", anomaly_count)
 
-        # 실패 레코드를 감사 테이블에 기록 (IS_PROCESSED=FALSE 역할 대체)
-        # Stream에서 이미 소비됐으므로 다음 실행에서 재조회되지 않음
+        # 실패 레코드를 감사 테이블에 기록 → 다음 실행에서 미처리 조인으로 재조회되지 않음
         if failures:
-            cur.execute("USE SCHEMA RAW")
             cur.executemany(
-                "INSERT INTO TRANSFORM_FAILURES "
-                "(CRAWLED_PRICES_ID, SITE, CATEGORY, PRODUCT_NAME, PRICE_TEXT, CRAWLED_AT, REJECT_REASON) "
+                "INSERT INTO `raw_transform_failures` "
+                "(`crawled_prices_id`, `site`, `category`, `product_name`, `price_text`, `crawled_at`, `reject_reason`) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 failures,
             )
-            logger.info("[Staging] 변환 실패 %d건 → TRANSFORM_FAILURES 기록", len(failures))
-            cur.execute("USE SCHEMA STAGING")
+            logger.info("[Staging] 변환 실패 %d건 → raw_transform_failures 기록", len(failures))
 
         if not parsed:
             logger.info("[Staging] 유효한 데이터 없음")
             cur.close()
             return 0
 
+        # stg_products UPSERT (자연키 site+product_name, 구 MERGE 대체)
         cur.executemany(
-            "MERGE INTO PRODUCTS t "
-            "USING (SELECT %s AS SITE, %s AS PRODUCT_NAME, %s AS NEW_URL) s "
-            "ON t.SITE = s.SITE AND t.PRODUCT_NAME = s.PRODUCT_NAME "
-            "WHEN NOT MATCHED THEN INSERT (SITE, CATEGORY, PRODUCT_NAME, URL) "
-            "VALUES (%s, %s, %s, s.NEW_URL) "
-            "WHEN MATCHED THEN UPDATE SET "
-            "URL = CASE WHEN s.NEW_URL != '' THEN s.NEW_URL ELSE t.URL END, "
-            "UPDATED_AT = CURRENT_TIMESTAMP()",
-            [(site_display, name, url or '', site_display, category, name)
+            "INSERT INTO `stg_products` (`site`, `category`, `product_name`, `url`) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE "
+            "`url` = IF(VALUES(`url`) <> '', VALUES(`url`), `url`), "
+            "`updated_at` = CURRENT_TIMESTAMP",
+            [(site_display, category, name, url or '')
              for _, site_display, category, name, url, _, _ in parsed],
         )
 
-        cur.execute("SELECT PRODUCT_ID, SITE, PRODUCT_NAME FROM PRODUCTS")
+        # product_id 매핑 조회
+        cur.execute("SELECT `product_id`, `site`, `product_name` FROM `stg_products`")
         product_map = {(row[1], row[2]): row[0] for row in cur.fetchall()}
 
         daily_rows = []
@@ -119,12 +114,11 @@ def transform_staging(settings: SnowflakeSettings) -> int:
             daily_rows.append((product_id, raw_id, price, crawled_at))
 
         if daily_rows:
+            # stg_price_history UPSERT (자연키 product_id+crawled_at, WHEN NOT MATCHED → no-op)
             cur.executemany(
-                "MERGE INTO PRICE_HISTORY t "
-                "USING (SELECT %s AS PRODUCT_ID, %s AS RAW_ID, %s AS PRICE, %s AS CRAWLED_AT) s "
-                "ON t.PRODUCT_ID = s.PRODUCT_ID AND t.CRAWLED_AT = s.CRAWLED_AT "
-                "WHEN NOT MATCHED THEN INSERT (PRODUCT_ID, RAW_ID, PRICE, CRAWLED_AT) "
-                "VALUES (s.PRODUCT_ID, s.RAW_ID, s.PRICE, s.CRAWLED_AT)",
+                "INSERT INTO `stg_price_history` (`product_id`, `raw_id`, `price`, `crawled_at`) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE `id` = `id`",
                 daily_rows,
             )
 

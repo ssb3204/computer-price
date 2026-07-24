@@ -1,12 +1,14 @@
 """Unit tests: 파이프라인 데이터 품질 검사."""
 
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from datetime import UTC
+from unittest.mock import MagicMock, patch
 
 from src.pipeline.crawl import crawl_all_sites
-from src.pipeline.quality import LayerConsistencyResult, _find_cross_site_anomalies, check_layer_consistency
-
+from src.pipeline.quality import (
+    LayerConsistencyResult,
+    _find_cross_site_anomalies,
+    check_layer_consistency,
+)
 
 # ── 교차 검증 순수 함수 ──────────────────────────────────────────────────────
 
@@ -73,8 +75,8 @@ class TestFindCrossSiteAnomalies:
 
 class TestZeroCountCheck:
     def _make_settings(self):
-        from src.common.config import SnowflakeSettings
-        return MagicMock(spec=SnowflakeSettings)
+        from src.common.config import MySQLSettings
+        return MagicMock(spec=MySQLSettings)
 
     def test_zero_result_added_to_failures(self):
         """크롤러가 0건 반환하면 failures에 추가된다."""
@@ -108,9 +110,9 @@ class TestZeroCountCheck:
 
     def test_partial_zero_only_zero_sites_in_failures(self):
         """일부 사이트만 0건일 때 해당 사이트만 failures에 들어간다."""
-        from src.common.models import RawCrawledPrice
-        from datetime import timezone
         from datetime import datetime
+
+        from src.common.models import RawCrawledPrice
 
         mock_ctx = MagicMock()
         mock_ctx.__enter__ = MagicMock(return_value=MagicMock())
@@ -119,7 +121,7 @@ class TestZeroCountCheck:
         dummy = RawCrawledPrice(
             site="danawa", category="CPU", product_name="Test",
             price_text="100,000원", brand="테스트", url="https://example.com",
-            crawled_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+            crawled_at=datetime(2000, 1, 1, tzinfo=UTC),
         )
 
         danawa = MagicMock()
@@ -152,7 +154,7 @@ class TestZeroCountCheck:
 
 
 def _make_mock_conn(raw_count, staging_count, missing_analytics):
-    """check_layer_consistency용 Mock Snowflake 커넥션 생성."""
+    """check_layer_consistency용 Mock MySQL 커넥션 생성."""
     cur = MagicMock()
     cur.fetchone.side_effect = [
         (raw_count, staging_count),   # Raw vs Staging 건수
@@ -190,8 +192,8 @@ class TestLayerConsistencyResult:
 
 class TestCheckLayerConsistency:
     def _make_settings(self):
-        from src.common.config import SnowflakeSettings
-        return MagicMock(spec=SnowflakeSettings)
+        from src.common.config import MySQLSettings
+        return MagicMock(spec=MySQLSettings)
 
     def test_normal_case_no_issues(self):
         """정상 케이스: 손실 낮고 누락 없음."""

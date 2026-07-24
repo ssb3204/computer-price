@@ -1,6 +1,6 @@
 ---
 name: dash-dashboard
-description: "Dash/Plotly 웹 대시보드 개발·수정 스킬. 새 페이지 추가, 차트 수정, 콜백 구현, Snowflake 쿼리 최적화, 레이아웃 변경 등 대시보드 관련 모든 작업 시 반드시 이 스킬을 사용. (localhost:8050)"
+description: "Dash/Plotly 웹 대시보드 개발·수정 스킬. 새 페이지 추가, 차트 수정, 콜백 구현, MySQL 쿼리 최적화, 레이아웃 변경 등 대시보드 관련 모든 작업 시 반드시 이 스킬을 사용. (localhost:8050)"
 ---
 
 # Dash 대시보드 스킬
@@ -23,7 +23,7 @@ src/dashboard/
 │   ├── watchlist.py            — 관심 목록 페이지
 │   └── pipeline.py             — 파이프라인 모니터링 페이지
 └── data_access/
-    └── snowflake_queries.py    — Snowflake 쿼리 함수
+    └── mysql_queries.py        — MySQL 쿼리 함수
 ```
 
 ## 핵심 패턴
@@ -37,17 +37,17 @@ src/dashboard/
 2. `app.py`에 라우팅 추가
 3. `callbacks.py`에 콜백 임포트 추가
 
-### 2. Snowflake 쿼리 원칙
+### 2. MySQL 쿼리 원칙
 
-- Analytics 레이어만 조회 (`ANALYTICS.*` 또는 `STAGING.*` 뷰)
+- Analytics(ans_) 레이어만 조회 (`ans_*` 테이블 또는 `stg_latest_prices` 뷰)
 - Raw/Staging 직접 조회 금지 — 대시보드 성능과 레이어 분리 원칙
-- 쿼리 함수는 `data_access/snowflake_queries.py`에 집중
+- 쿼리 함수는 `data_access/mysql_queries.py`에 집중
 
 ### 3. 콜백 순수성
 
 콜백은 입력 → 출력 변환만 담당한다:
 - 사이드이펙트(파일 쓰기, 전역 상태 변경) 없이 작성
-- 무거운 Snowflake 쿼리는 `@dash.callback` 내부가 아닌 `data_access/` 함수로 분리
+- 무거운 MySQL 쿼리는 `@dash.callback` 내부가 아닌 `data_access/` 함수로 분리
 
 ### 4. Plotly 차트
 
@@ -58,7 +58,7 @@ src/dashboard/
 
 ## 작업 절차
 
-1. 관련 레이아웃 파일과 `snowflake_queries.py` 읽기
+1. 관련 레이아웃 파일과 `mysql_queries.py` 읽기
 2. 설계 제시 → 사용자 확인 → 구현
 3. 레이아웃 → 쿼리 → 콜백 순서로 단계별 구현
 4. 각 단계 완료 후 Docker 환경에서 실제 동작 확인 (localhost:8050)
@@ -67,7 +67,7 @@ src/dashboard/
 
 대시보드 오류 시:
 - [ ] Docker 서비스 실행 여부 확인 (`docker compose ps`)
-- [ ] Snowflake 연결 환경변수 확인
+- [ ] MySQL 연결 환경변수 확인 (.env의 MYSQL_*)
 - [ ] 콜백 ID 충돌 여부 확인 (중복 Output ID)
 - [ ] 쿼리 대상 테이블이 Analytics 레이어인지 확인
 - [ ] 빈 데이터 핸들링 (쿼리 결과 0건 시 차트 동작)

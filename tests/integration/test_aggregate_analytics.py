@@ -14,57 +14,40 @@ def _setup_staging(settings):
 
 
 @pytest.mark.integration
-def test_aggregate_analytics_creates_product_stats(snowflake_settings, snowflake_conn):
-    """aggregate_analytics() 후 PRODUCT_STATS에 row가 생성되는지 확인."""
-    _setup_staging(snowflake_settings)
+def test_aggregate_analytics_creates_daily_summary(mysql_settings, mysql_conn):
+    """aggregate_analytics() 후 ans_daily_price_stats에 row가 생성되는지 확인."""
+    _setup_staging(mysql_settings)
 
-    aggregate_analytics(snowflake_settings)
+    aggregate_analytics(mysql_settings)
 
-    cur = snowflake_conn.cursor()
+    cur = mysql_conn.cursor()
     cur.execute("""
-        SELECT COUNT(*) FROM ANALYTICS.PRODUCT_STATS ps
-        JOIN STAGING.PRODUCTS p ON ps.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.PRODUCT_NAME LIKE %s
+        SELECT COUNT(*) FROM `ans_daily_price_stats` ds
+        JOIN `stg_products` p ON ds.`product_id` = p.`product_id`
+        WHERE p.`product_name` LIKE %s
     """, (TEST_PREFIX + "%",))
     assert cur.fetchone()[0] >= 1
     cur.close()
 
 
 @pytest.mark.integration
-def test_aggregate_analytics_creates_daily_summary(snowflake_settings, snowflake_conn):
-    """aggregate_analytics() 후 DAILY_PRICE_STATS에 row가 생성되는지 확인."""
-    _setup_staging(snowflake_settings)
+def test_aggregate_analytics_correct_values(mysql_settings, mysql_conn):
+    """ans_daily_price_stats의 min_price/max_price가 실제 가격과 일치하는지 확인."""
+    load_raw(mysql_settings, [_make_raw(f"{TEST_PREFIX}PSU_001", "150,000원")])
+    transform_staging(mysql_settings)
 
-    aggregate_analytics(snowflake_settings)
+    aggregate_analytics(mysql_settings)
 
-    cur = snowflake_conn.cursor()
+    cur = mysql_conn.cursor()
     cur.execute("""
-        SELECT COUNT(*) FROM ANALYTICS.DAILY_PRICE_STATS ds
-        JOIN STAGING.PRODUCTS p ON ds.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.PRODUCT_NAME LIKE %s
-    """, (TEST_PREFIX + "%",))
-    assert cur.fetchone()[0] >= 1
-    cur.close()
-
-
-@pytest.mark.integration
-def test_aggregate_analytics_correct_values(snowflake_settings, snowflake_conn):
-    """PRODUCT_STATS의 MIN_PRICE_EVER/MAX_PRICE_EVER가 실제 가격과 일치하는지 확인."""
-    load_raw(snowflake_settings, [_make_raw(f"{TEST_PREFIX}PSU_001", "150,000원")])
-    transform_staging(snowflake_settings)
-
-    aggregate_analytics(snowflake_settings)
-
-    cur = snowflake_conn.cursor()
-    cur.execute("""
-        SELECT ps.MIN_PRICE_EVER, ps.MAX_PRICE_EVER
-        FROM ANALYTICS.PRODUCT_STATS ps
-        JOIN STAGING.PRODUCTS p ON ps.PRODUCT_ID = p.PRODUCT_ID
-        WHERE p.PRODUCT_NAME = %s
+        SELECT ds.`min_price`, ds.`max_price`
+        FROM `ans_daily_price_stats` ds
+        JOIN `stg_products` p ON ds.`product_id` = p.`product_id`
+        WHERE p.`product_name` = %s
     """, (f"{TEST_PREFIX}PSU_001",))
     row = cur.fetchone()
     cur.close()
 
     assert row is not None
-    assert row[0] == 150000  # MIN_PRICE_EVER
-    assert row[1] == 150000  # MAX_PRICE_EVER
+    assert row[0] == 150000  # min_price
+    assert row[1] == 150000  # max_price
