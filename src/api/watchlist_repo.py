@@ -16,6 +16,21 @@ from src.common.mysql_client import get_connection
 
 logger = logging.getLogger(__name__)
 
+# stg_watchlist ↔ stg_products 조인 조건.
+# 두 테이블 사이에 FK가 없고 URL 안의 상품 ID 문자열로만 연결되는 기존 스키마
+# 관례를 그대로 따른다(사이트마다 파라미터 이름이 다름). build_repo 도 같은
+# 경로로 가격을 찾으므로 여기서 한 번만 정의해 공유한다.
+# 주의: pymysql 에 파라미터를 넘기므로 LIKE 의 % 는 %% 로 이스케이프해야 한다.
+WATCHLIST_PRODUCT_JOIN = """
+        JOIN stg_products p
+          ON p.site = w.site
+          AND (
+              (w.site = '다나와' AND p.url LIKE CONCAT('%%pcode=', w.pcode, '%%'))
+           OR (w.site = '컴퓨존' AND p.url LIKE CONCAT('%%ProductNo=', w.pcode, '%%'))
+           OR (w.site = '견적왕' AND p.url LIKE CONCAT('%%pd_no=', w.pcode, '%%'))
+          )
+"""
+
 
 @dataclass(frozen=True)
 class PricePoint:
@@ -161,19 +176,12 @@ def get_price_history(settings: MySQLSettings, watchlist_id: int) -> list[PriceP
     """이 워치리스트 항목의 시간별 가격 이력 조회 (오래된 순).
 
     stg_watchlist(pcode) -> stg_products(url에 pcode 포함 여부로 매칭) -> stg_price_history
-    stg_watchlist 와 stg_products 사이에 FK가 없고 URL 패턴으로만 연결되는
-    기존 스키마 관례를 그대로 따른다.
+    조인 조건은 WATCHLIST_PRODUCT_JOIN 참고.
     """
-    sql = """
+    sql = f"""
         SELECT ph.price, ph.crawled_at
         FROM stg_watchlist w
-        JOIN stg_products p
-          ON p.site = w.site
-          AND (
-              (w.site = '다나와' AND p.url LIKE CONCAT('%%pcode=', w.pcode, '%%'))
-           OR (w.site = '컴퓨존' AND p.url LIKE CONCAT('%%ProductNo=', w.pcode, '%%'))
-           OR (w.site = '견적왕' AND p.url LIKE CONCAT('%%pd_no=', w.pcode, '%%'))
-          )
+        {WATCHLIST_PRODUCT_JOIN}
         JOIN stg_price_history ph ON ph.product_id = p.product_id
         WHERE w.id = %s
         ORDER BY ph.crawled_at ASC

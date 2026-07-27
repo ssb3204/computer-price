@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
+from src.api.watchlist_repo import WATCHLIST_PRODUCT_JOIN
 from src.common.config import MySQLSettings
 from src.common.mysql_client import get_connection
 
@@ -200,6 +201,51 @@ def remove_build_item(settings: MySQLSettings, build_id: int, watchlist_id: int)
         with conn.cursor() as cur:
             cur.execute(sql, (build_id, watchlist_id))
             return cur.rowcount > 0
+
+
+def get_daily_part_prices(
+    settings: MySQLSettings, build_id: int
+) -> dict[int, list[tuple[date, int]]]:
+    """조합에 담긴 부품들의 '일별 마지막 가격'을 부품별로 모아 반환한다.
+
+    같은 날 여러 번 크롤링되므로(4회/일) ROW_NUMBER 로 그날 마지막 행만 남긴다.
+    crawled_at 이 같은 값이 들어오는 극단적 경우까지 순서를 확정하려고 id 도
+    정렬 키에 넣었다.
+
+    가격 이력이 하나도 없는 부품은 빈 리스트로 담아 반환한다 — 호출부
+    (build_trend.build_daily_totals)가 "총액을 만들 수 없는 조합"으로 판정하는
+    데 이 정보가 필요하다.
+
+    반환: {watchlist_id: [(날짜, 가격), ...]}  (날짜 오름차순)
+    """
+    sql = f"""
+        SELECT watchlist_id, d, price FROM (
+            SELECT bi.watchlist_id,
+                   DATE(ph.crawled_at) AS d,
+                   ph.price,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY bi.watchlist_id, DATE(ph.crawled_at)
+                       ORDER BY ph.crawled_at DESC, ph.id DESC
+                   ) AS rn
+            FROM build_items bi
+            JOIN stg_watchlist w ON w.id = bi.watchlist_id
+            {WATCHLIST_PRODUCT_JOIN}
+            JOIN stg_price_history ph ON ph.product_id = p.product_id
+            WHERE bi.build_id = %s
+        ) t
+        WHERE t.rn = 1
+        ORDER BY t.watchlist_id ASC, t.d ASC
+    """
+    with get_connection(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT watchlist_id FROM build_items WHERE build_id = %s", (build_id,))
+            result: dict[int, list[tuple[date, int]]] = {r[0]: [] for r in cur.fetchall()}
+            if not result:
+                return {}
+            cur.execute(sql, (build_id,))
+            for watchlist_id, day, price in cur.fetchall():
+                result[watchlist_id].append((day, int(price)))
+    return result
 
 
 def _to_summary(row: tuple) -> BuildSummary:

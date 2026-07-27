@@ -4,9 +4,12 @@
 SQL 이 의도대로 동작하는지가 핵심이라 mock 이 아닌 실 DB 로 확인한다.
 """
 
+from datetime import date, datetime
+
 import pytest
 
 from src.api import build_repo, watchlist_repo
+from src.api.build_trend import build_daily_totals
 from src.common.mysql_client import get_connection
 from tests.integration.conftest import TEST_PREFIX
 
@@ -241,3 +244,115 @@ def _is_active(settings, watchlist_id: int) -> int:
         with conn.cursor() as cur:
             cur.execute("SELECT is_active FROM stg_watchlist WHERE id = %s", (watchlist_id,))
             return cur.fetchone()[0]
+
+
+# ── 일별 가격 조회 (SQL) ─────────────────────────────────────────────────────
+
+
+def _seed_prices(settings, pcode: str, points: list[tuple[datetime, int]]) -> None:
+    """이 pcode 에 대응하는 stg_products + stg_price_history 를 심는다.
+
+    stg_watchlist ↔ stg_products 는 FK 가 없고 URL 안의 pcode 문자열로만
+    연결되므로(WATCHLIST_PRODUCT_JOIN), url 을 다나와 형식으로 맞춰준다.
+    """
+    with get_connection(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO stg_products (site, category, product_name, url)
+                VALUES ('다나와', 'CPU', %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    product_id = LAST_INSERT_ID(product_id), url = VALUES(url)
+                """,
+                (f"{TEST_PREFIX}상품 {pcode}", f"https://prod.danawa.com/info/?pcode={pcode}"),
+            )
+            product_id = cur.lastrowid
+            for crawled_at, price in points:
+                cur.execute(
+                    "INSERT IGNORE INTO stg_price_history (product_id, price, crawled_at) "
+                    "VALUES (%s, %s, %s)",
+                    (product_id, price, crawled_at),
+                )
+
+
+@pytest.mark.integration
+def test_daily_prices_keep_only_last_crawl_of_each_day(mysql_settings, author):
+    """하루 4회 크롤링되므로 그날 마지막 값만 남아야 한다."""
+    build_id = build_repo.create_build(mysql_settings, author, f"{TEST_PREFIX}일별")
+    wid = _make_watch_item(mysql_settings, "daily1")
+    build_repo.add_build_item(mysql_settings, build_id, wid)
+    _seed_prices(mysql_settings, f"{TEST_PREFIX}daily1", [
+        (datetime(2026, 7, 1, 1, 0), 500),
+        (datetime(2026, 7, 1, 6, 0), 490),
+        (datetime(2026, 7, 1, 20, 0), 470),   # 그날 마지막
+        (datetime(2026, 7, 2, 6, 0), 460),
+    ])
+
+    prices = build_repo.get_daily_part_prices(mysql_settings, build_id)
+
+    assert prices[wid] == [(date(2026, 7, 1), 470), (date(2026, 7, 2), 460)]
+
+
+@pytest.mark.integration
+def test_daily_prices_grouped_by_part(mysql_settings, author):
+    build_id = build_repo.create_build(mysql_settings, author, f"{TEST_PREFIX}부품별")
+    wid_a = _make_watch_item(mysql_settings, "grpA")
+    wid_b = _make_watch_item(mysql_settings, "grpB")
+    build_repo.add_build_item(mysql_settings, build_id, wid_a)
+    build_repo.add_build_item(mysql_settings, build_id, wid_b)
+    _seed_prices(mysql_settings, f"{TEST_PREFIX}grpA", [(datetime(2026, 7, 1, 6, 0), 500)])
+    _seed_prices(mysql_settings, f"{TEST_PREFIX}grpB", [(datetime(2026, 7, 1, 6, 0), 300)])
+
+    prices = build_repo.get_daily_part_prices(mysql_settings, build_id)
+
+    assert set(prices) == {wid_a, wid_b}
+    assert prices[wid_a] == [(date(2026, 7, 1), 500)]
+    assert prices[wid_b] == [(date(2026, 7, 1), 300)]
+
+
+@pytest.mark.integration
+def test_part_without_price_history_returns_empty_list(mysql_settings, author):
+    """이력 없는 부품도 키는 남는다 — 집계 쪽이 '총액 불가'를 판정하는 데 쓴다."""
+    build_id = build_repo.create_build(mysql_settings, author, f"{TEST_PREFIX}이력없음")
+    wid = _make_watch_item(mysql_settings, "noprice")
+    build_repo.add_build_item(mysql_settings, build_id, wid)
+
+    prices = build_repo.get_daily_part_prices(mysql_settings, build_id)
+
+    assert prices == {wid: []}
+
+
+@pytest.mark.integration
+def test_empty_build_returns_empty_dict(mysql_settings, author):
+    build_id = build_repo.create_build(mysql_settings, author, f"{TEST_PREFIX}빈조합")
+
+    assert build_repo.get_daily_part_prices(mysql_settings, build_id) == {}
+
+
+@pytest.mark.integration
+def test_repo_output_feeds_trend_aggregation(mysql_settings, author):
+    """repo(SQL) → build_trend(순수 함수) 연결이 실제로 맞물리는지 확인.
+
+    부품 두 개의 이력 시작일이 다르고 중간에 공백이 있는, 실제로 자주 나올
+    형태로 총액이 나오는지 본다.
+    """
+    build_id = build_repo.create_build(mysql_settings, author, f"{TEST_PREFIX}연결")
+    wid_cpu = _make_watch_item(mysql_settings, "e2eCPU")
+    wid_gpu = _make_watch_item(mysql_settings, "e2eGPU")
+    build_repo.add_build_item(mysql_settings, build_id, wid_cpu)
+    build_repo.add_build_item(mysql_settings, build_id, wid_gpu)
+
+    _seed_prices(mysql_settings, f"{TEST_PREFIX}e2eCPU", [
+        (datetime(2026, 7, 1, 6, 0), 300),
+        (datetime(2026, 7, 3, 6, 0), 280),   # 7/2 공백 → forward fill 대상
+    ])
+    _seed_prices(mysql_settings, f"{TEST_PREFIX}e2eGPU", [
+        (datetime(2026, 7, 2, 6, 0), 900),   # CPU 보다 늦게 시작
+        (datetime(2026, 7, 3, 6, 0), 880),
+    ])
+
+    points = build_daily_totals(build_repo.get_daily_part_prices(mysql_settings, build_id))
+
+    # 두 부품이 모두 값을 갖는 7/2부터 시작
+    assert [p.date for p in points] == [date(2026, 7, 2), date(2026, 7, 3)]
+    assert [p.total for p in points] == [1200, 1160]   # 300+900, 280+880
