@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 
+from src.api.build_router import public_build_router, user_build_router
 from src.api.users_router import router as users_router
 from src.api.watchlist_router import crawl_router, user_watchlist_router
 
@@ -20,6 +21,8 @@ app = FastAPI(title="computer_price API", version="0.1.0")
 app.include_router(users_router)
 app.include_router(crawl_router)
 app.include_router(user_watchlist_router)
+app.include_router(public_build_router)
+app.include_router(user_build_router)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
