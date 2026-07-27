@@ -51,6 +51,37 @@ def _cleanup(settings: MySQLSettings) -> None:
             "DELETE FROM `raw_transform_failures` WHERE `product_name` LIKE %s",
             (TEST_PREFIX + "%",),
         )
+
+        # 조합/워치리스트/사용자 (FK 역순: 자식 → 부모)
+        # build_items 는 builds 삭제 시 ON DELETE CASCADE 로 지워지지만,
+        # stg_watchlist 만 참조하는 행이 남을 수 있어 먼저 명시적으로 지운다.
+        like = TEST_PREFIX + "%"
+        cur.execute(
+            """
+            DELETE FROM `build_items`
+            WHERE `build_id` IN (
+                    SELECT `id` FROM `builds` WHERE `user_id` IN (
+                        SELECT `id` FROM `users` WHERE `username` LIKE %s))
+               OR `watchlist_id` IN (
+                    SELECT `id` FROM `stg_watchlist` WHERE `query` LIKE %s)
+            """,
+            (like, like),
+        )
+        cur.execute(
+            "DELETE FROM `builds` WHERE `user_id` IN "
+            "(SELECT `id` FROM `users` WHERE `username` LIKE %s)",
+            (like,),
+        )
+        cur.execute(
+            """
+            DELETE FROM `user_watchlist`
+            WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `username` LIKE %s)
+               OR `watchlist_id` IN (SELECT `id` FROM `stg_watchlist` WHERE `query` LIKE %s)
+            """,
+            (like, like),
+        )
+        cur.execute("DELETE FROM `stg_watchlist` WHERE `query` LIKE %s", (like,))
+        cur.execute("DELETE FROM `users` WHERE `username` LIKE %s", (like,))
         cur.close()
 
 

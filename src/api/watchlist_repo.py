@@ -116,16 +116,27 @@ def unlink_user_watchlist(settings: MySQLSettings, user_id: int, watchlist_id: i
 
 
 def deactivate_if_orphaned(settings: MySQLSettings, watchlist_id: int) -> bool:
-    """이 상품을 담은 user_watchlist row가 0개면 stg_watchlist.is_active를 0으로.
+    """이 상품을 참조하는 곳이 하나도 없으면 stg_watchlist.is_active를 0으로.
 
-    한 명이라도 아직 담고 있으면 아무것도 하지 않는다(계속 크롤링 유지).
+    참조자는 두 종류다:
+      1. user_watchlist — 누군가의 워치리스트에 담겨 있음
+      2. build_items    — 누군가의 공개 조합에 부품으로 들어가 있음
+
+    2번을 빼먹으면, 조합에 담긴 상품을 작성자가 워치리스트에서 빼는 순간
+    크롤링이 멈춰서 남들이 보고 있는 공개 조합의 가격이 갱신되지 않는다.
+
+    하나라도 참조가 남아 있으면 아무것도 하지 않는다(계속 크롤링 유지).
     Returns: 실제로 비활성화했으면 True.
     """
     with get_connection(settings) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) FROM user_watchlist WHERE watchlist_id = %s",
-                (watchlist_id,),
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM user_watchlist WHERE watchlist_id = %s)
+                  + (SELECT COUNT(*) FROM build_items    WHERE watchlist_id = %s)
+                """,
+                (watchlist_id, watchlist_id),
             )
             (remaining,) = cur.fetchone()
             if remaining > 0:
