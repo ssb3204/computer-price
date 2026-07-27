@@ -106,7 +106,7 @@ jobs:
 
       - name: 스키마 적용
         run: |
-          for f in mysql/ddl/schema.sql mysql/ddl/users.sql mysql/ddl/user_watchlist.sql; do
+          for f in mysql/ddl/schema.sql mysql/ddl/users.sql mysql/ddl/user_watchlist.sql mysql/ddl/builds.sql; do
             echo "applying $f"
             mysql -h 127.0.0.1 -P 3306 -u price_app -pci_app_pw computer_price < "$f"
           done
