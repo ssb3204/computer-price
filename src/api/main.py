@@ -11,7 +11,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from src.api.build_router import public_build_router, user_build_router
 from src.api.users_router import router as users_router
@@ -26,11 +25,6 @@ app.include_router(public_build_router)
 app.include_router(user_build_router)
 
 _STATIC_DIR = Path(__file__).parent / "static"
-
-# vendor/chart.umd.min.js 같은 정적 자산을 그대로 서빙한다.
-# 차트 라이브러리는 CDN 이 아니라 저장소에 넣어 두고 여기서 내려준다
-# (오프라인·로컬 Docker 에서도 뜨고, 외부를 부르지 않는 기존 페이지 성격 유지).
-app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 
 @app.get("/health", tags=["meta"])
@@ -66,9 +60,3 @@ def mypage_page() -> FileResponse:
 @app.get("/watchlist", tags=["meta"])
 def watchlist_page() -> FileResponse:
     return FileResponse(_STATIC_DIR / "watchlist.html")
-
-
-@app.get("/builds", tags=["meta"])
-def builds_page() -> FileResponse:
-    """부품 조합 페이지. 공개 조합 API 는 경로 충돌을 피해 /api/builds 에 있다."""
-    return FileResponse(_STATIC_DIR / "builds.html")

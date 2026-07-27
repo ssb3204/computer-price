@@ -80,8 +80,7 @@ computer_price/
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
 │   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
 │   └── api/             # FastAPI (users, watchlist, builds)
-│       └── static/      # 웹 UI (로그인/회원가입/홈/마이페이지/워치리스트/부품조합)
-│           └── vendor/  # Chart.js (CDN 미사용)
+│       └── static/      # 웹 UI (로그인/회원가입/홈/마이페이지/워치리스트)
 ├── mysql/               # MySQL DDL (3-Layer)
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
@@ -123,10 +122,9 @@ computer_price/
 |--------|-----|------|
 | 로그인 | `/` | 계정 로그인 |
 | 회원가입 | `/signup` | 계정 생성 |
-| 홈 | `/home` | 메인 화면 |
+| 홈 | `/home` | 메인 화면 (사이드바: 가격 추이 · 부품 조합 · 크롤링 대상 관리) |
 | 마이페이지 | `/mypage` | 프로필 관리 |
 | 워치리스트 | `/watchlist` | 관심 상품 검색·추가·삭제, 가격 이력 조회 |
-| 부품 조합 | `/builds` | 조합 둘러보기, 총액 추이 차트, 부품 관리 |
 | API 문서 | `/docs` | FastAPI 자동 생성 문서 |
 
 ### 부품 조합 (공개 게시물)
@@ -141,7 +139,8 @@ computer_price/
 - **모든 부품이 가격을 가진 날부터** 그린다. 있는 것만 더하면 뒤늦게 담긴 부품이
   합류하는 날 총액이 급등해 가격이 오른 것처럼 보인다
 
-차트는 Chart.js를 `src/api/static/vendor/`에 넣어 쓴다(CDN 미사용).
+조합 화면은 별도 페이지가 아니라 홈(`/home`) 사이드바의 **부품 조합** 메뉴에서 열린다.
+차트는 가격 추이 화면과 같은 inline SVG로 그린다(외부 차트 라이브러리 미사용).
 
 ## 알림 기준
 

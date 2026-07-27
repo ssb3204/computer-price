@@ -28,7 +28,7 @@ src/
 ├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py, parser_utils.py
 ├── pipeline/        # crawl, load_raw, transform, quality, detect, analytics, slack
 └── api/             # main.py, security.py, users_*, watchlist_*, build_*, static/(웹 UI)
-    └── static/      # index/signup/home/mypage/watchlist/builds.html, vendor/(Chart.js)
+    └── static/      # index/signup/home/mypage/watchlist.html (조합 화면은 home.html 안)
 run_pipeline.py      # 파이프라인 전체 실행 진입점
 
 ## 개발 규칙
@@ -71,15 +71,16 @@ run_pipeline.py      # 파이프라인 전체 실행 진입점
 - 변경 감지: LAG() 윈도우 함수로 이전 가격 비교, ans_product_stats로 NEW_LOW/NEW_HIGH 판정
 - 타임스탬프: DATETIME, 앱과 DB 세션 모두 UTC로 통일 저장(mysql_client가 연결 시 세션 타임존을 UTC로 고정)
 - api 코드 변경 시 docker-compose가 ./src를 볼륨 마운트하므로 즉시 반영된다 (필요 시 docker compose restart api)
-- 조합(builds): 읽기는 공개(/api/builds), 쓰기는 작성자만(/users/{uid}/builds).
+- 조합(builds): 읽기는 공개(/builds), 쓰기는 작성자만(/users/{uid}/builds).
   남의 조합 수정 시도는 403이 아니라 404로 응답한다 — 403은 "그 id가 존재한다"는
-  사실을 흘린다. 페이지가 /builds를 쓰므로 공개 API만 /api 접두사를 쓴다(경로 충돌 회피)
+  사실을 흘린다
 - 조합 총액 추이: 일별 마지막 값 + forward fill, 모든 부품이 가격을 가진 날부터 시작.
   집계는 src/api/build_trend.py의 순수 함수(DB 무관) — 규칙 변경 시 여기만 보면 된다
 - stg_watchlist.is_active를 내리는 조건에 build_items도 포함해야 한다. 빼먹으면
   공개 조합에 담긴 상품의 크롤링이 멈춰 남의 화면에서 가격이 갱신되지 않는다
-- 차트는 Chart.js를 static/vendor/에 넣어 쓴다(CDN 금지). 시간축 어댑터를 추가로
-  받지 않으려고 라벨을 미리 만들어 category 축을 쓴다
+- 조합 화면은 별도 페이지가 아니라 home.html 안에서 사이드바로 전환한다(가격 추이·
+  크롤링 대상 관리와 동일 방식). 차트도 그 화면의 renderChart와 같은 inline SVG로
+  그린다 — 외부 차트 라이브러리를 쓰지 않는다
 
 ## Docker 서비스
 | 서비스 | 포트 |

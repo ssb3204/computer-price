@@ -110,7 +110,7 @@ def test_anyone_can_read_build_detail(owner, owned_watch_item):
         json={"watchlist_id": owned_watch_item},
     )
 
-    res = client.get(f"/api/builds/{build_id}")
+    res = client.get(f"/builds/{build_id}")
 
     assert res.status_code == 200
     body = res.json()
@@ -123,7 +123,7 @@ def test_anyone_can_read_build_detail(owner, owned_watch_item):
 def test_public_list_includes_build(owner):
     build_id = _create_build(owner, f"{TEST_PREFIX}목록노출")
 
-    res = client.get("/api/builds", params={"limit": 100})
+    res = client.get("/builds", params={"limit": 100})
 
     assert res.status_code == 200
     assert any(b["build_id"] == build_id for b in res.json())
@@ -131,7 +131,7 @@ def test_public_list_includes_build(owner):
 
 @pytest.mark.integration
 def test_unknown_build_returns_404():
-    assert client.get("/api/builds/99999999").status_code == 404
+    assert client.get("/builds/99999999").status_code == 404
 
 
 # ── 쓰기 권한 ────────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ def test_stranger_cannot_delete_build(owner, stranger):
     res = client.delete(f"/users/{stranger}/builds/{build_id}")
 
     assert res.status_code == 404
-    assert client.get(f"/api/builds/{build_id}").status_code == 200, "남이 지워버렸다"
+    assert client.get(f"/builds/{build_id}").status_code == 200, "남이 지워버렸다"
 
 
 @pytest.mark.integration
@@ -157,7 +157,7 @@ def test_stranger_cannot_rename_build(owner, stranger):
     )
 
     assert res.status_code == 404
-    assert client.get(f"/api/builds/{build_id}").json()["build"]["name"] == f"{TEST_PREFIX}이름방어"
+    assert client.get(f"/builds/{build_id}").json()["build"]["name"] == f"{TEST_PREFIX}이름방어"
 
 
 @pytest.mark.integration
@@ -170,7 +170,7 @@ def test_stranger_cannot_add_item(owner, stranger, owned_watch_item):
     )
 
     assert res.status_code == 404
-    assert client.get(f"/api/builds/{build_id}").json()["items"] == []
+    assert client.get(f"/builds/{build_id}").json()["items"] == []
 
 
 @pytest.mark.integration
@@ -190,7 +190,7 @@ def test_owner_can_delete_own_build(owner):
     build_id = _create_build(owner, f"{TEST_PREFIX}내가삭제")
 
     assert client.delete(f"/users/{owner}/builds/{build_id}").status_code == 204
-    assert client.get(f"/api/builds/{build_id}").status_code == 404
+    assert client.get(f"/builds/{build_id}").status_code == 404
 
 
 # ── 부품 출처 제한 ───────────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ def test_cannot_add_item_not_in_my_watchlist(owner, stranger, mysql_settings):
     )
 
     assert res.status_code == 404
-    assert client.get(f"/api/builds/{build_id}").json()["items"] == []
+    assert client.get(f"/builds/{build_id}").json()["items"] == []
 
 
 @pytest.mark.integration
@@ -228,7 +228,7 @@ def test_add_and_remove_item(owner, owned_watch_item):
 
     rm = client.delete(f"/users/{owner}/builds/{build_id}/items/{owned_watch_item}")
     assert rm.status_code == 204
-    assert client.get(f"/api/builds/{build_id}").json()["items"] == []
+    assert client.get(f"/builds/{build_id}").json()["items"] == []
 
 
 @pytest.mark.integration
@@ -248,7 +248,7 @@ def test_trend_reports_reason_when_no_items(owner):
     """부품이 없으면 빈 추이 + 이유를 알려준다(500 이 아니라)."""
     build_id = _create_build(owner, f"{TEST_PREFIX}추이없음")
 
-    res = client.get(f"/api/builds/{build_id}/price-trend")
+    res = client.get(f"/builds/{build_id}/price-trend")
 
     assert res.status_code == 200
     body = res.json()
@@ -265,7 +265,7 @@ def test_trend_reports_reason_when_price_missing(owner, owned_watch_item):
         json={"watchlist_id": owned_watch_item},
     )
 
-    res = client.get(f"/api/builds/{build_id}/price-trend")
+    res = client.get(f"/builds/{build_id}/price-trend")
 
     assert res.status_code == 200
     assert res.json()["points"] == []
@@ -277,11 +277,11 @@ def test_trend_is_public(owner):
     """추이도 공개 — 작성자가 아니어도 조회된다."""
     build_id = _create_build(owner, f"{TEST_PREFIX}추이공개")
 
-    assert client.get(f"/api/builds/{build_id}/price-trend").status_code == 200
+    assert client.get(f"/builds/{build_id}/price-trend").status_code == 200
 
 
 @pytest.mark.integration
 def test_trend_days_param_is_validated(owner):
     build_id = _create_build(owner, f"{TEST_PREFIX}days검증")
 
-    assert client.get(f"/api/builds/{build_id}/price-trend", params={"days": 0}).status_code == 422
+    assert client.get(f"/builds/{build_id}/price-trend", params={"days": 0}).status_code == 422
