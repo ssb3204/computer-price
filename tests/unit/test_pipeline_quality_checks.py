@@ -199,7 +199,7 @@ class TestCheckLayerConsistency:
         """정상 케이스: 손실 낮고 누락 없음."""
         mock_conn = _make_mock_conn(32, 31, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
-             patch("src.pipeline.quality._send_slack_message") as mock_slack:
+             patch("src.pipeline.quality.send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
 
         assert result.raw_count == 32
@@ -214,7 +214,7 @@ class TestCheckLayerConsistency:
         """손실률 10% 초과 시 Slack 알림."""
         mock_conn = _make_mock_conn(32, 10, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
-             patch("src.pipeline.quality._send_slack_message") as mock_slack:
+             patch("src.pipeline.quality.send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
 
         assert result.drop_rate > 10.0
@@ -226,7 +226,7 @@ class TestCheckLayerConsistency:
         """Analytics 누락 상품 있으면 Slack 알림."""
         mock_conn = _make_mock_conn(30, 30, 5)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
-             patch("src.pipeline.quality._send_slack_message") as mock_slack:
+             patch("src.pipeline.quality.send_slack_message") as mock_slack:
             result = check_layer_consistency(self._make_settings())
 
         assert result.missing_analytics == 5
@@ -238,7 +238,7 @@ class TestCheckLayerConsistency:
         """Raw 건수가 0이면 drop_rate=0.0으로 처리 (ZeroDivisionError 방지)."""
         mock_conn = _make_mock_conn(0, 0, 0)
         with patch("src.pipeline.quality.get_connection", return_value=mock_conn), \
-             patch("src.pipeline.quality._send_slack_message"):
+             patch("src.pipeline.quality.send_slack_message"):
             result = check_layer_consistency(self._make_settings())
 
         assert result.drop_rate == 0.0

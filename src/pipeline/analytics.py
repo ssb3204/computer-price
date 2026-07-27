@@ -12,7 +12,7 @@ def aggregate_analytics(settings: MySQLSettings) -> None:
     """ans_daily_price_stats를 stg_price_history로 갱신한다.
 
     주별/월별/전체기간 통계는 이 함수가 만들지 않는다 — 소비하는 쪽(detect.py,
-    대시보드, quality.py)이 ans_daily_price_stats를 즉석 GROUP BY 해서 구한다.
+    quality.py)이 ans_daily_price_stats를 즉석 GROUP BY 해서 구한다.
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()

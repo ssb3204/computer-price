@@ -150,8 +150,7 @@ def get_price_history(settings: MySQLSettings, watchlist_id: int) -> list[PriceP
     """이 워치리스트 항목의 시간별 가격 이력 조회 (오래된 순).
 
     stg_watchlist(pcode) -> stg_products(url에 pcode 포함 여부로 매칭) -> stg_price_history
-    매칭 방식은 대시보드(src/dashboard/data_access/mysql_queries.py의 get_watch_products)와
-    동일하다 — stg_watchlist 와 stg_products 사이에 FK가 없고 URL 패턴으로만 연결되는
+    stg_watchlist 와 stg_products 사이에 FK가 없고 URL 패턴으로만 연결되는
     기존 스키마 관례를 그대로 따른다.
     """
     sql = """

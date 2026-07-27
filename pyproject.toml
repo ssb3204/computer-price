@@ -11,12 +11,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "requests>=2.31",
     "pymysql>=1.1",
-    "dash>=2.14",
-    "dash-bootstrap-components>=1.5",
-    "plotly>=5.18",
-    "pandas>=2.1",
     "pydantic-settings>=2.1",
-    "flask-caching>=2.1",
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "bcrypt>=4.1",
@@ -48,7 +43,6 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.ruff.lint.per-file-ignores]
 "scripts/**" = ["E501", "E402"]
 "tests/**" = ["E402"]
-"src/dashboard/app.py" = ["E402"]
 "src/pipeline/detect.py" = ["N806"]
 "src/**" = ["E501"]
 

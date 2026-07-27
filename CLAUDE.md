@@ -6,30 +6,26 @@
 
 ## 프로젝트 개요
 컴퓨터 부품 가격 비교 사이트 3곳(다나와, 컴퓨존, 견적왕)을 크롤링하여 일일 가격을 수집하고,
-가격 변동을 시각화하는 웹 대시보드. 로컬 Docker Compose로 운영.
+사용자별 관심 상품(워치리스트)의 가격 변동을 추적하는 시스템. FastAPI 웹 UI로 제공.
 
 ## 기술 스택
 - Python 3.11+, BeautifulSoup (크롤링)
-- GitHub Actions (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일 목표)
-- DWH: MySQL 8.0 로컬 (단일 DB `computer_price`, 3-Layer는 테이블 접두사 raw_/stg_/ans_ 방식)
-- Dash/Plotly (웹 대시보드)
-- Docker Compose (1개 서비스: dashboard)
-
-## ⚠️ 미해결 과제: GitHub Actions 스케줄링
-- DWH가 로컬 MySQL이라 GitHub Actions 러너에서 DB에 접근할 수 없다. 4회/일 자동 크롤링 스케줄이 현재 동작하지 않는다.
-- 해결 전까지는 `python run_pipeline.py`로 로컬에서 수동 실행. 대안(자체 러너, DB 외부 노출, 로컬 cron 등)은 미정.
+- GitHub Actions (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일 — 동작 중)
+- DWH: MySQL 8.0 (Oracle Cloud VM 상시가동, 단일 DB `computer_price`, 3-Layer는 테이블 접두사 raw_/stg_/ans_ 방식)
+- FastAPI + 정적 HTML (웹 UI: 로그인/회원가입/마이페이지/워치리스트)
+- Docker Compose (1개 서비스: api)
 
 ## 데이터 흐름
 크롤러 → run_pipeline.py → MySQL (raw_ → stg_ → 변경감지/알림 → ans_)
                                               ↓
-                                       dashboard ← MySQL
+                                          api ← MySQL
 
 ## 프로젝트 구조
 src/
 ├── common/          # models.py, config.py, mysql_client.py
 ├── crawlers/        # base.py, danawa.py, compuzone.py, pc_estimate.py, parser_utils.py
 ├── pipeline/        # crawl, load_raw, transform, quality, detect, analytics, slack
-└── dashboard/       # app.py, callbacks.py, helpers.py, layouts/, data_access/, assets/
+└── api/             # main.py, security.py, users_*, watchlist_*, static/(웹 UI)
 run_pipeline.py      # 파이프라인 전체 실행 진입점
 
 ## 개발 규칙
@@ -71,20 +67,20 @@ run_pipeline.py      # 파이프라인 전체 실행 진입점
 - 증분 처리: "미처리 조인"(대상 테이블에 없는 raw 행만 조회) 방식. batch_id는 도입하지 않음
 - 변경 감지: LAG() 윈도우 함수로 이전 가격 비교, ans_product_stats로 NEW_LOW/NEW_HIGH 판정
 - 타임스탬프: DATETIME, 앱과 DB 세션 모두 UTC로 통일 저장(mysql_client가 연결 시 세션 타임존을 UTC로 고정)
-- 대시보드 코드 변경 후 반드시 docker compose restart dashboard 필요 (hot-reload 비활성, DASH_DEBUG=true 시 활성)
+- api 코드 변경 시 docker-compose가 ./src를 볼륨 마운트하므로 즉시 반영된다 (필요 시 docker compose restart api)
 
 ## Docker 서비스
 | 서비스 | 포트 |
 |---|---|
-| Dashboard | localhost:8050 |
+| API + 웹 UI | localhost:8001 |
 
 ## Environment
 - Desktop files go to the actual visible Desktop (check OneDrive redirection on Windows)
 - Confirm gh CLI and key deps are installed before scripting workflows
 
 ## 실행
-docker compose up -d                    # 대시보드 시작
-docker compose restart dashboard        # 코드 변경 반영
-docker compose logs -f dashboard        # 로그 확인
+docker compose up -d                    # api 시작
+docker compose restart api              # 코드 변경 반영
+docker compose logs -f api              # 로그 확인
 python run_pipeline.py                  # 파이프라인 로컬 수동 실행
 python -m pytest tests/ -v -o "addopts="  # 테스트 실행

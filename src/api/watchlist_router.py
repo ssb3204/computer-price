@@ -1,7 +1,6 @@
 """크롤링 대상 검색/워치리스트 라우터 (FastAPI).
 
-검색은 기존 Dash 대시보드(src/dashboard/callbacks.py)가 쓰는 것과 동일한
-크롤러 search_products() 를 그대로 재사용한다. 사이트별로 반환 필드명이
+검색은 크롤러의 search_products() 를 그대로 재사용한다. 사이트별로 반환 필드명이
 다르므로(pcode/pd_no/product_no) 여기서 "pcode" 하나로 정규화해 응답한다
 (stg_watchlist 저장 시에도 전부 pcode 컬럼 하나로 통일되는 것과 동일한 관례).
 
@@ -128,7 +127,7 @@ def _to_public(item: watchlist_repo.UserWatchlistItem) -> WatchlistItemPublic:
 def _trigger_immediate_crawl(
     settings: MySQLSettings, site: str, query: str, pcode: str, category: str, brand: str | None
 ) -> None:
-    """담기 직후 백그라운드에서 1회 즉시 크롤링 (Dash 대시보드의 _trigger_single_crawl과 동일 함수 재사용).
+    """담기 직후 백그라운드에서 1회 즉시 크롤링.
 
     실패해도 워치리스트 담기 자체는 이미 성공한 상태 — 다음 정규 스케줄에서 재시도된다.
     """

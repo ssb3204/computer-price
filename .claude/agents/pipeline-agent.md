@@ -37,5 +37,4 @@ MySQL 3-Layer 파이프라인(Raw → Staging → Analytics)과 Airflow DAG를 �
 ## 협업
 
 - crawler-agent로부터 DTO 스키마 변경 수신 시 UNIQUE 키·컬럼을 업데이트한다
-- dashboard-agent에게 새 Analytics 테이블/뷰 스키마를 `SendMessage`로 전달한다
 - qa-agent에게 검증 대상 파이프라인 단계와 테이블명을 전달한다
