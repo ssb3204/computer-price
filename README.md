@@ -85,7 +85,7 @@ computer_price/
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
 │   └── integration/     # 로컬 MySQL 통합 테스트
-├── .github/workflows/   # CI (린트+유닛 테스트), 크롤링 스케줄
+├── .github/workflows/   # CI (린트+유닛+통합 테스트), 크롤링 스케줄
 ├── run_pipeline.py      # 파이프라인 진입점 (6단계 + 품질 검증)
 └── docker-compose.yml
 ```
@@ -144,6 +144,9 @@ pip install -e ".[dev]"
 # 유닛 테스트
 python -m pytest tests/unit/ -v -o "addopts="
 
-# 통합 테스트 (로컬 MySQL 연결 필요)
+# 통합 테스트 (실제 MySQL 연결 필요 — .env 의 접속 정보 사용)
 python -m pytest tests/integration/ -v -o "addopts=" -m integration
 ```
+
+CI 에서는 통합 테스트용 MySQL 8.0 컨테이너를 러너 안에 띄우고 `mysql/ddl/` 을
+적용해서 돌린다. 운영 DB 는 건드리지 않는다.
