@@ -55,8 +55,8 @@ def build_daily_totals(
     start = max(points[0][0] for points in series.values())   # 모두가 값을 갖는 첫날
     end = max(points[-1][0] for points in series.values())    # 마지막 수집일
 
-    cursor = dict.fromkeys(series, 0)          # 부품별로 어디까지 소비했는지
-    current: dict[int, int | None] = dict.fromkeys(series)    # 현재 적용 중인 가격
+    cursor = dict.fromkeys(series, 0)   # 부품별로 어디까지 소비했는지
+    current: dict[int, int] = {}        # 현재 적용 중인 가격
 
     result: list[TrendPoint] = []
     day = start
@@ -69,12 +69,9 @@ def build_daily_totals(
                 i += 1
             cursor[wid] = i
 
-        # start 정의상 여기서 None 이 남을 수 없지만, 방어적으로 확인한다
-        if all(v is not None for v in current.values()):
-            snapshot = {wid: price for wid, price in current.items() if price is not None}
-            result.append(
-                TrendPoint(date=day, total=sum(snapshot.values()), prices=snapshot)
-            )
+        # start 가 "모두가 값을 갖는 첫날"이므로 여기서 current 는 항상 꽉 차 있다.
+        # (빈 곳을 건너뛰는 가드를 두면 start 를 잘못 잡아도 증상이 가려진다)
+        result.append(TrendPoint(date=day, total=sum(current.values()), prices=dict(current)))
         day += timedelta(days=1)
 
     return result
