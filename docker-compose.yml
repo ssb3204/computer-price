@@ -1,29 +1,5 @@
 services:
 
-  # --- Dashboard ---
-
-  dashboard:
-    build:
-      context: .
-      dockerfile: docker/dashboard/Dockerfile
-    ports:
-      - "8050:8050"
-    volumes:
-      - ./src:/app/src
-    environment:
-      # 컨테이너 안에서 localhost 는 컨테이너 자신을 가리키므로,
-      # .env 에 MYSQL_HOST 를 지정하지 않으면 host.docker.internal(로컬 호스트)을 기본값으로 사용.
-      # Oracle VM 등 원격 MySQL 로 전환하려면 .env 에 MYSQL_HOST=<원격 IP> 만 추가하면 됨.
-      MYSQL_HOST: ${MYSQL_HOST:-host.docker.internal}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_USER: ${MYSQL_USER:-price_app}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-computer_price}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-
   # --- FastAPI (users API) ---
 
   api:
@@ -33,7 +9,7 @@ services:
     ports:
       - "8001:8000"          # 호스트 8001 -> 컨테이너 8000. 호스트 8000은 다른 프로젝트(code-visual-backend)가 점유 중이라 회피
     volumes:
-      - ./src:/app/src       # 코드 수정 즉시 반영 (dashboard 와 동일 방식)
+      - ./src:/app/src       # 코드 수정 즉시 반영
     environment:
       # 컨테이너 안에서 localhost 는 컨테이너 자신을 가리키므로,
       # .env 에 MYSQL_HOST 를 지정하지 않으면 host.docker.internal(로컬 호스트)을 기본값으로 사용.

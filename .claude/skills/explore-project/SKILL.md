@@ -16,7 +16,7 @@ description: "프로젝트 전체 구조·코드·MySQL 스키마·데이터 흐
 3. **크롤러** — `src/crawlers/` 전체 (base.py → 각 사이트 크롤러 → parser_utils.py)
 4. **파이프라인** — `src/pipeline/` 전체 (crawl → load_raw → transform → quality → detect → slack → observability)
 5. **Airflow DAG** — `src/airflow_dags/` (DAG 구조, 태스크 의존성)
-6. **대시보드** — `src/dashboard/` 전체 (app.py → layouts/ → callbacks.py → data_access/)
+6. **API/웹 UI** — `src/api/` 전체 (main.py → *_router.py → *_repo.py → static/)
 7. **테스트** — `tests/` 전체
 
 ## 산출물 구조 (`project-deep-dive.md`)
@@ -33,7 +33,7 @@ description: "프로젝트 전체 구조·코드·MySQL 스키마·데이터 흐
 - 각 디렉토리·파일의 역할을 한 줄 설명
 
 ### 4. 데이터 흐름 (엔드투엔드)
-- 크롤러 실행부터 대시보드 표시까지 단계별 추적
+- 크롤러 실행부터 웹 UI 표시까지 단계별 추적
 - 각 단계의 입력/출력 데이터 형태 명시
 
 ### 5. MySQL 스키마
@@ -46,7 +46,7 @@ description: "프로젝트 전체 구조·코드·MySQL 스키마·데이터 흐
 ```
 
 ### 6. 핵심 모듈 상세
-각 모듈(크롤러, 파이프라인 단계, 대시보드 페이지)에 대해:
+각 모듈(크롤러, 파이프라인 단계, API 엔드포인트)에 대해:
 - 역할
 - 핵심 함수/클래스와 동작 원리
 - 주의사항 (예: 광고 필터 로직, Stream 소비 방식)

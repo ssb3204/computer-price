@@ -1,6 +1,6 @@
 # 컴퓨터 가격 모니터링 시스템
 
-컴퓨터 부품 가격 비교 사이트 3곳을 크롤링하여 일일 가격을 수집하고, 가격 변동을 시각화하는 웹 대시보드.
+컴퓨터 부품 가격 비교 사이트 3곳을 크롤링하여 일일 가격을 수집하고, 사용자별 관심 상품의 가격 변동을 추적하는 시스템.
 
 ## 아키텍처
 
@@ -14,9 +14,9 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
            ├── Step 3.5: 품질 검증 (레이어 정합성, 사이트 간 가격 편차)
            ├── Step 4: 변경 감지 & 알림 (NEW_LOW, PRICE_DROP 등)
            ├── Step 5: Slack 실패 알림
-           └── Step 6: Analytics 집계 (일별/주별 요약)
+           └── Step 6: Analytics 집계 (일별 요약)
                            │
-                     Dashboard ← MySQL
+                    API + 웹 UI ← MySQL
 ```
 
 ## 크롤링 대상
@@ -33,16 +33,16 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
 |--------|------|
 | 크롤링 | Python, BeautifulSoup |
 | 오케스트레이션 | GitHub Actions (하루 4회) |
-| DWH | MySQL 8.0 로컬 (단일 DB `computer_price`, 3-Layer: 테이블 접두사 raw_/stg_/ans_) |
-| 시각화 | Dash (Plotly) |
-| 인프라 | Docker Compose (대시보드 단일 서비스) |
+| DWH | MySQL 8.0 (Oracle Cloud VM 상시가동, 단일 DB `computer_price`, 3-Layer: 테이블 접두사 raw_/stg_/ans_) |
+| 웹 | FastAPI + 정적 HTML |
+| 인프라 | Docker Compose (api 단일 서비스) |
 
 ## 빠른 시작
 
 ### 사전 요구사항
 
 - Docker Desktop
-- MySQL 8.0 (로컬 설치, `price_app` 전용 계정 — root 계정은 사용하지 않음)
+- MySQL 8.0 (`price_app` 전용 계정 — root 계정은 사용하지 않음)
 
 ### 설정
 
@@ -57,7 +57,7 @@ cp .env.example .env
 ### 실행
 
 ```bash
-# 대시보드 서비스 기동
+# api 서비스 기동
 docker compose up -d
 
 # 수동 파이프라인 실행
@@ -68,7 +68,8 @@ python run_pipeline.py
 
 | 서비스 | URL |
 |--------|-----|
-| 대시보드 | http://localhost:8050 |
+| 웹 UI | http://localhost:8001 |
+| API 문서 | http://localhost:8001/docs |
 
 ## 프로젝트 구조
 
@@ -78,14 +79,13 @@ computer_price/
 │   ├── common/          # 공유 모듈 (models, config, mysql_client)
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
 │   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
-│   └── dashboard/       # Dash 웹 대시보드
-│       ├── layouts/     # 페이지별 레이아웃 (5개 페이지)
-│       └── data_access/ # MySQL 쿼리
+│   └── api/             # FastAPI (users, watchlist)
+│       └── static/      # 웹 UI (로그인/회원가입/홈/마이페이지/워치리스트)
 ├── mysql/               # MySQL DDL (3-Layer)
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
 │   └── integration/     # 로컬 MySQL 통합 테스트
-├── .github/workflows/   # CI (유닛+통합 테스트), 크롤링 스케줄
+├── .github/workflows/   # CI (린트+유닛 테스트), 크롤링 스케줄
 ├── run_pipeline.py      # 파이프라인 진입점 (6단계 + 품질 검증)
 └── docker-compose.yml
 ```
@@ -105,19 +105,22 @@ computer_price/
 
 ### Analytics (`ans_`) — 집계
 - **ans_daily_price_stats** — 일별 최저/최고/평균 가격
-- **ans_weekly_price_stats** — 주별 요약
-- **ans_product_stats** — 상품별 전체 통계 (min_price_ever/max_price_ever)
+  - 주별/전체기간 통계는 별도 테이블 없이 이 테이블을 즉석 GROUP BY 해서 구한다
 
-## 대시보드 기능 (localhost:8050)
+### Users
+- **users** — 회원 계정
+- **user_watchlist** — 사용자와 관심 상품 연결
+
+## 웹 UI (localhost:8001)
 
 | 페이지 | URL | 내용 |
 |--------|-----|------|
-| 대시보드 | `/` | 추적 제품 수, 카테고리, 사이트, 오늘 수집 건수 + 카테고리별 가격 요약 |
-| 가격 정보 | `/prices` | 사이트/카테고리 필터, 상품별 최신 가격 |
-| 가격 추이 | `/trends` | 키워드 검색, 사이트별 최저가 라인 차트, 당일 크롤링 비교 |
-| 가격 알림 | `/alerts` | 날짜별 구분, 유형/카테고리 필터 (NEW_LOW/NEW_HIGH/PRICE_DROP/PRICE_SPIKE) |
-| 크롤링 대상 | `/watchlist` | 관심 상품 추가/삭제 관리, 카테고리별 검색 |
-| 파이프라인 ↗ | GitHub Actions | 크롤링 스케줄 실행 이력 (외부 링크) |
+| 로그인 | `/` | 계정 로그인 |
+| 회원가입 | `/signup` | 계정 생성 |
+| 홈 | `/home` | 메인 화면 |
+| 마이페이지 | `/mypage` | 프로필 관리 |
+| 워치리스트 | `/watchlist` | 관심 상품 검색·추가·삭제, 가격 이력 조회 |
+| API 문서 | `/docs` | FastAPI 자동 생성 문서 |
 
 ## 알림 기준
 

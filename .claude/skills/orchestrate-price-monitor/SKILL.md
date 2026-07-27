@@ -1,6 +1,6 @@
 ---
 name: orchestrate-price-monitor
-description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조율하는 오케스트레이터. 크롤러 수정/추가, MySQL 파이프라인 변경, Dash 대시보드 개발, 새 기능 추가, 버그 수정, 테스트 실행, 프로젝트 구조 파악, 면접 대비 문서화, 기술 개념 Q&A 등 이 프로젝트의 모든 작업 시 반드시 이 스킬을 사용. 후속 작업(수정, 보완, 다시 실행, 업데이트, 이전 결과 개선, 크롤러만 다시, 파이프라인만, 개념 추가, 섹션 보완)에도 반드시 이 스킬을 사용."
+description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조율하는 오케스트레이터. 크롤러 수정/추가, MySQL 파이프라인 변경, FastAPI 웹/API 개발, 새 기능 추가, 버그 수정, 테스트 실행, 프로젝트 구조 파악, 면접 대비 문서화, 기술 개념 Q&A 등 이 프로젝트의 모든 작업 시 반드시 이 스킬을 사용. 후속 작업(수정, 보완, 다시 실행, 업데이트, 이전 결과 개선, 크롤러만 다시, 파이프라인만, 개념 추가, 섹션 보완)에도 반드시 이 스킬을 사용."
 ---
 
 # 가격 모니터링 오케스트레이터
@@ -20,7 +20,6 @@ description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조
 |---------|------|------|---------|
 | crawler-agent | 크롤러 개발·수정 | crawl-price-sites | src/crawlers/ |
 | pipeline-agent | MySQL/Airflow 파이프라인 | mysql-pipeline | src/pipeline/, src/airflow_dags/ |
-| dashboard-agent | Dash 대시보드 | dash-dashboard | src/dashboard/ |
 | qa-agent | 통합 테스트·검증 | qa-integration | tests/ |
 | explorer-agent | 프로젝트 전체 탐색·문서화 | explore-project | 전체 |
 | concept-tutor-agent | 기술 개념 Q&A 생성 | concept-interview-prep | 전체 |
@@ -40,7 +39,6 @@ description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조
 1. 사용자 요청에서 영향받는 레이어 파악:
    - 크롤러만 → crawler-agent
    - 파이프라인(SQL/DAG)만 → pipeline-agent
-   - 대시보드만 → dashboard-agent
    - 2개 이상 레이어 → 에이전트 팀 구성
 2. CLAUDE.md 개발 규칙 확인: 설계 먼저 제시, 사용자 확인 후 구현
 3. `_workspace/` 생성 (신규 실행 시)
@@ -53,7 +51,7 @@ description: "컴퓨터 가격 모니터링 시스템의 에이전트 팀을 조
 
 ```
 Agent(
-  subagent_type: "crawler-agent" | "pipeline-agent" | "dashboard-agent",
+  subagent_type: "crawler-agent" | "pipeline-agent",
   model: "opus",
   prompt: "
     [스킬 로드] .claude/skills/{skill-name}/SKILL.md 를 읽고 지침을 따른다.
@@ -90,8 +88,6 @@ Agent(
          prompt: ".claude/skills/crawl-price-sites/SKILL.md 를 읽고 담당 작업 수행" },
        { name: "pipeline", agent_type: "pipeline-agent", model: "opus",
          prompt: ".claude/skills/mysql-pipeline/SKILL.md 를 읽고 담당 작업 수행" },
-       { name: "dashboard", agent_type: "dashboard-agent", model: "opus",
-         prompt: ".claude/skills/dash-dashboard/SKILL.md 를 읽고 담당 작업 수행" },
        { name: "qa", agent_type: "qa-agent", model: "opus",
          prompt: ".claude/skills/qa-integration/SKILL.md 를 읽고 각 모듈 완성 직후 점진적 검증 수행" }
      ]
@@ -106,12 +102,9 @@ Agent(
      { title: "파이프라인 수정", assignee: "pipeline",
        description: "{파이프라인 관련 상세 작업}",
        depends_on: ["크롤러 수정"] },
-     { title: "대시보드 수정", assignee: "dashboard",
-       description: "{대시보드 관련 상세 작업}",
-       depends_on: ["파이프라인 수정"] },
      { title: "통합 검증", assignee: "qa",
        description: "전체 레이어 정합성 검증",
-       depends_on: ["크롤러 수정", "파이프라인 수정", "대시보드 수정"] }
+       depends_on: ["크롤러 수정", "파이프라인 수정"] }
    ])
    ```
 
@@ -167,7 +160,7 @@ Phase 1: 레이어 파악
 
 ### 에러 흐름 (크로스-레이어)
 1. 사용자: "새 부품 카테고리(모니터) 추가해줘"
-2. Phase 1: 크롤러 + 파이프라인 + 대시보드 전체 영향 파악
+2. Phase 1: 크롤러 + 파이프라인 전체 영향 파악
 3. Phase 3: 에이전트 팀 구성
 4. pipeline-agent가 DTO 변경으로 실패
 5. SendMessage로 상태 확인 → 스키마 재확인 후 재시도

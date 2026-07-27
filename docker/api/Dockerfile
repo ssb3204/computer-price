@@ -1,5 +1,4 @@
 # FastAPI (users API) 컨테이너
-# 기존 docker/dashboard/Dockerfile 과 베이스 이미지·설치 방식을 맞추되,
 # PyMySQL 은 순수 파이썬이라 C 컴파일러(gcc)나 libpq-dev 가 필요 없어 제외했다.
 FROM python:3.11-slim
 

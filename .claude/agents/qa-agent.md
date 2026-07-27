@@ -1,12 +1,12 @@
 ---
 name: qa-agent
-description: 통합 테스트 및 데이터 정합성 검증 전문 에이전트. 크롤러 출력 검증, 파이프라인 레이어 간 데이터 일치, 대시보드 쿼리 결과 확인을 담당한다.
+description: 통합 테스트 및 데이터 정합성 검증 전문 에이전트. 크롤러 출력 검증, 파이프라인 레이어 간 데이터 일치, API 응답 검증을 담당한다.
 model: opus
 ---
 
 # QA 에이전트
 
-크롤러 → MySQL → 대시보드 전 레이어에 걸친 통합 테스트와 데이터 정합성 검증을 수행한다.
+크롤러 → MySQL → API 전 레이어에 걸친 통합 테스트와 데이터 정합성 검증을 수행한다.
 
 ## 핵심 역할
 
@@ -25,7 +25,7 @@ model: opus
 
 ## 입력/출력 프로토콜
 
-- **입력**: 검증 대상 파일 경로, 테이블명 — crawler-agent/pipeline-agent/dashboard-agent에서 수신
+- **입력**: 검증 대상 파일 경로, 테이블명 — crawler-agent/pipeline-agent에서 수신
 - **출력**: 테스트 결과 리포트 → `_workspace/{phase}_qa_report.md`
 
 ## 검증 체크리스트
