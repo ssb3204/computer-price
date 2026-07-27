@@ -289,6 +289,7 @@
   <div class="layout">
     <nav class="sidebar">
       <button class="side-item" id="priceTrendNav" type="button">컴퓨터 가격 추이</button>
+      <button class="side-item" id="buildsNav" type="button">부품 조합</button>
       <button class="side-item" id="watchlistNav" type="button">크롤링 대상 관리</button>
     </nav>
 
@@ -768,6 +769,9 @@
   document.getElementById('priceTrendNav').addEventListener('click', openPriceTrend);
   document.getElementById('watchlistNav').addEventListener('click', openWatchlistManage);
   document.getElementById('watchlistLink').addEventListener('click', openWatchlistManage);
+  document.getElementById('buildsNav').addEventListener('click', () => {
+    window.location.href = `/builds?id=${encodeURIComponent(userId || '')}`;
+  });
 </script>
 </body>
 </html>

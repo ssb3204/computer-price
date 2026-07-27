@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>부품 조합</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    background: #f4f4f5;
+    color: #111;
+  }
+  .container { max-width: 640px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    margin-bottom: 20px;
+  }
+  a { color: #2563eb; }
+  select, input[type="text"] {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  input[type="text"] { flex: 1; min-width: 140px; }
+  button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+  .btn-ghost { background: #e5e7eb; color: #111; }
+  .btn-danger { background: transparent; color: #dc2626; padding: 4px 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hidden { display: none; }
+
+  /* 조합 목록 */
+  .build-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid #f0f0f0; cursor: pointer;
+  }
+  .build-item:last-child { border-bottom: none; }
+  .build-item:hover .build-name { text-decoration: underline; }
+  .build-item.active { background: #eff6ff; margin: 0 -20px; padding: 12px 20px; }
+  .build-name { font-size: 15px; font-weight: 600; }
+  .build-meta { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .badge {
+    font-size: 11px; background: #dbeafe; color: #1d4ed8;
+    padding: 2px 6px; border-radius: 10px; margin-left: 6px;
+  }
+
+  /* 부품 */
+  .part-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid #f0f0f0; gap: 8px;
+  }
+  .part-item:last-child { border-bottom: none; }
+  .part-cat {
+    font-size: 11px; color: #6b7280; background: #f3f4f6;
+    padding: 2px 6px; border-radius: 4px; flex: 0 0 auto;
+  }
+  .part-name { font-size: 14px; flex: 1; word-break: break-all; }
+  .part-site { font-size: 12px; color: #9ca3af; flex: 0 0 auto; }
+
+  /* 요약 */
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+  .summary div { font-size: 13px; color: #6b7280; }
+  .summary strong { display: block; font-size: 18px; color: #111; margin-top: 2px; }
+
+  .loading, .empty, .notice { font-size: 13px; color: #6b7280; padding: 8px 0; }
+  .message { font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .chart-box { position: relative; height: 260px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <p><a id="backLink" href="/home">← 홈으로</a></p>
+  <h1>부품 조합</h1>
+
+  <!-- 조합 목록 -->
+  <div class="card">
+    <h2>조합 둘러보기</h2>
+    <p class="notice">모든 사용자의 조합을 볼 수 있습니다. 수정은 만든 사람만 가능합니다.</p>
+    <div id="buildList" class="loading">불러오는 중…</div>
+  </div>
+
+  <!-- 새 조합 만들기 (로그인 시에만) -->
+  <div class="card hidden" id="createCard">
+    <h2>새 조합 만들기</h2>
+    <div class="row">
+      <input type="text" id="newBuildName" placeholder="예: 게이밍용" maxlength="100">
+      <button class="btn-primary" id="createBtn">만들기</button>
+    </div>
+    <div class="message" id="createMessage"></div>
+  </div>
+
+  <!-- 상세 -->
+  <div class="card hidden" id="detailCard">
+    <h2 id="detailTitle">조합</h2>
+    <div class="build-meta" id="detailMeta"></div>
+
+    <div class="summary" id="detailSummary"></div>
+
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn-ghost" data-days="7">1주</button>
+      <button class="btn-ghost" data-days="30">1달</button>
+      <button class="btn-ghost" data-days="90">3달</button>
+      <button class="btn-ghost" data-days="">전체</button>
+    </div>
+    <div class="chart-box"><canvas id="trendChart"></canvas></div>
+    <div class="notice hidden" id="trendNotice"></div>
+
+    <h2 style="margin-top:20px">구성 부품</h2>
+    <div id="partList" class="loading">불러오는 중…</div>
+
+    <!-- 편집 영역: 내 조합일 때만 -->
+    <div class="hidden" id="editArea">
+      <h2 style="margin-top:20px">내 워치리스트에서 추가</h2>
+      <div class="row">
+        <select id="watchSelect"></select>
+        <button class="btn-primary" id="addPartBtn">추가</button>
+      </div>
+      <div class="message" id="editMessage"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const userId = params.get('id');
+  document.getElementById('backLink').href = `/home?id=${encodeURIComponent(userId || '')}`;
+
+  const buildListEl = document.getElementById('buildList');
+  const createCard = document.getElementById('createCard');
+  const detailCard = document.getElementById('detailCard');
+  const partListEl = document.getElementById('partList');
+  const editArea = document.getElementById('editArea');
+  const watchSelect = document.getElementById('watchSelect');
+  const trendNotice = document.getElementById('trendNotice');
+
+  let selectedBuildId = null;
+  let selectedDays = 30;
+  let chart = null;
+
+  if (userId) createCard.classList.remove('hidden');
+
+  function message(el, text, isError) {
+    el.textContent = text;
+    el.style.color = isError ? '#dc2626' : '#16a34a';
+  }
+
+  const won = (n) => n.toLocaleString('ko-KR') + '원';
+
+  // ── 조합 목록 ──
+
+  async function loadBuilds() {
+    buildListEl.className = 'loading';
+    buildListEl.textContent = '불러오는 중…';
+    try {
+      const res = await fetch('/api/builds?limit=50');
+      if (!res.ok) throw new Error();
+      renderBuilds(await res.json());
+    } catch {
+      buildListEl.className = 'empty';
+      buildListEl.textContent = '조합을 불러오지 못했습니다.';
+    }
+  }
+
+  function renderBuilds(builds) {
+    if (builds.length === 0) {
+      buildListEl.className = 'empty';
+      buildListEl.textContent = '아직 만들어진 조합이 없습니다.';
+      return;
+    }
+    buildListEl.className = '';
+    buildListEl.innerHTML = '';
+    for (const b of builds) {
+      const mine = userId && String(b.author_id) === String(userId);
+      const item = document.createElement('div');
+      item.className = 'build-item' + (b.build_id === selectedBuildId ? ' active' : '');
+      const info = document.createElement('div');
+      const nameEl = document.createElement('div');
+      nameEl.className = 'build-name';
+      nameEl.textContent = b.name;
+      if (mine) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = '내 조합';
+        nameEl.appendChild(badge);
+      }
+      const meta = document.createElement('div');
+      meta.className = 'build-meta';
+      meta.textContent = `${b.author} · 부품 ${b.item_count}개`;
+      info.append(nameEl, meta);
+      item.appendChild(info);
+
+      if (mine) {
+        const del = document.createElement('button');
+        del.className = 'btn-danger';
+        del.textContent = '삭제';
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteBuild(b.build_id, b.name); });
+        item.appendChild(del);
+      }
+      item.addEventListener('click', () => selectBuild(b.build_id));
+      buildListEl.appendChild(item);
+    }
+  }
+
+  async function createBuild() {
+    const name = document.getElementById('newBuildName').value.trim();
+    const msg = document.getElementById('createMessage');
+    if (!name) return message(msg, '이름을 입력해 주세요.', true);
+    const res = await fetch(`/users/${encodeURIComponent(userId)}/builds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (res.status === 409) return message(msg, '같은 이름의 조합이 이미 있습니다.', true);
+    if (!res.ok) return message(msg, '조합을 만들지 못했습니다.', true);
+    const build = await res.json();
+    document.getElementById('newBuildName').value = '';
+    message(msg, '만들었습니다.', false);
+    await loadBuilds();
+    selectBuild(build.build_id);
+  }
+
+  async function deleteBuild(buildId, name) {
+    if (!confirm(`'${name}' 조합을 삭제할까요?`)) return;
+    const res = await fetch(`/users/${encodeURIComponent(userId)}/builds/${buildId}`, { method: 'DELETE' });
+    if (!res.ok) return alert('삭제하지 못했습니다.');
+    if (selectedBuildId === buildId) {
+      selectedBuildId = null;
+      detailCard.classList.add('hidden');
+    }
+    loadBuilds();
+  }
+
+  // ── 상세 ──
+
+  async function selectBuild(buildId) {
+    selectedBuildId = buildId;
+    detailCard.classList.remove('hidden');
+    partListEl.className = 'loading';
+    partListEl.textContent = '불러오는 중…';
+
+    const res = await fetch(`/api/builds/${buildId}`);
+    if (!res.ok) {
+      partListEl.className = 'empty';
+      partListEl.textContent = '조합을 불러오지 못했습니다.';
+      return;
+    }
+    const detail = await res.json();
+    const mine = userId && String(detail.build.author_id) === String(userId);
+
+    document.getElementById('detailTitle').textContent = detail.build.name;
+    document.getElementById('detailMeta').textContent =
+      `${detail.build.author} · 부품 ${detail.build.item_count}개`;
+
+    renderParts(detail.items, mine);
+    editArea.classList.toggle('hidden', !mine);
+    if (mine) loadWatchOptions(detail.items);
+
+    renderBuilds_refreshActive();
+    loadTrend();
+  }
+
+  function renderBuilds_refreshActive() {
+    document.querySelectorAll('.build-item').forEach((el) => el.classList.remove('active'));
+  }
+
+  function renderParts(items, mine) {
+    if (items.length === 0) {
+      partListEl.className = 'empty';
+      partListEl.textContent = '아직 부품이 없습니다.';
+      return;
+    }
+    partListEl.className = '';
+    partListEl.innerHTML = '';
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'part-item';
+
+      const cat = document.createElement('span');
+      cat.className = 'part-cat';
+      cat.textContent = it.category;
+
+      const name = document.createElement('span');
+      name.className = 'part-name';
+      name.textContent = it.product_name || '(이름 없음)';
+
+      const site = document.createElement('span');
+      site.className = 'part-site';
+      site.textContent = it.site;
+
+      row.append(cat, name, site);
+
+      if (mine) {
+        const del = document.createElement('button');
+        del.className = 'btn-danger';
+        del.textContent = '빼기';
+        del.addEventListener('click', () => removePart(it.watchlist_id));
+        row.appendChild(del);
+      }
+      partListEl.appendChild(row);
+    }
+  }
+
+  // ── 부품 편집 ──
+
+  async function loadWatchOptions(currentItems) {
+    const res = await fetch(`/users/${encodeURIComponent(userId)}/watchlist`);
+    if (!res.ok) return;
+    const already = new Set(currentItems.map((i) => i.watchlist_id));
+    const available = (await res.json()).filter((w) => !already.has(w.watchlist_id));
+
+    watchSelect.innerHTML = '';
+    if (available.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = '추가할 수 있는 상품이 없습니다';
+      opt.value = '';
+      watchSelect.appendChild(opt);
+      document.getElementById('addPartBtn').disabled = true;
+      return;
+    }
+    document.getElementById('addPartBtn').disabled = false;
+    for (const w of available) {
+      const opt = document.createElement('option');
+      opt.value = w.watchlist_id;
+      opt.textContent = `[${w.category}] ${w.product_name || w.pcode} (${w.site})`;
+      watchSelect.appendChild(opt);
+    }
+  }
+
+  async function addPart() {
+    const msg = document.getElementById('editMessage');
+    const watchlistId = watchSelect.value;
+    if (!watchlistId) return;
+    const res = await fetch(
+      `/users/${encodeURIComponent(userId)}/builds/${selectedBuildId}/items`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watchlist_id: Number(watchlistId) }),
+      }
+    );
+    if (!res.ok) return message(msg, '부품을 추가하지 못했습니다.', true);
+    message(msg, '추가했습니다.', false);
+    await selectBuild(selectedBuildId);
+    loadBuilds();
+  }
+
+  async function removePart(watchlistId) {
+    const res = await fetch(
+      `/users/${encodeURIComponent(userId)}/builds/${selectedBuildId}/items/${watchlistId}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) return alert('부품을 빼지 못했습니다.');
+    await selectBuild(selectedBuildId);
+    loadBuilds();
+  }
+
+  // ── 추이 차트 ──
+
+  async function loadTrend() {
+    const q = selectedDays ? `?days=${selectedDays}` : '';
+    const res = await fetch(`/api/builds/${selectedBuildId}/price-trend${q}`);
+    if (!res.ok) return;
+    const trend = await res.json();
+    renderSummary(trend.points);
+    renderChart(trend.points);
+
+    if (trend.points.length === 0) {
+      trendNotice.textContent = trend.unavailable_reason || '표시할 데이터가 없습니다.';
+      trendNotice.classList.remove('hidden');
+    } else {
+      trendNotice.classList.add('hidden');
+    }
+  }
+
+  function renderSummary(points) {
+    const el = document.getElementById('detailSummary');
+    if (points.length === 0) { el.innerHTML = ''; return; }
+    const totals = points.map((p) => p.total);
+    const latest = totals[totals.length - 1];
+    const min = Math.min(...totals);
+    const max = Math.max(...totals);
+    const diff = latest - totals[0];
+    const sign = diff > 0 ? '+' : '';
+    el.innerHTML = `
+      <div>현재<strong>${won(latest)}</strong></div>
+      <div>최저<strong>${won(min)}</strong></div>
+      <div>최고<strong>${won(max)}</strong></div>
+      <div>기간 변동<strong>${sign}${won(diff)}</strong></div>`;
+  }
+
+  function renderChart(points) {
+    const canvas = document.getElementById('trendChart');
+    if (chart) { chart.destroy(); chart = null; }
+    if (points.length === 0) return;
+
+    // 시간축 어댑터를 따로 vendoring 하지 않으려고 라벨을 미리 만들어 category 축을 쓴다
+    const labels = points.map((p) => p.date.slice(5).replace('-', '/'));
+
+    chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: '조합 총액',
+          data: points.map((p) => p.total),
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.08)',
+          fill: true,
+          tension: 0.2,
+          pointRadius: points.length > 60 ? 0 : 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => won(ctx.parsed.y) } },
+        },
+        scales: {
+          y: {
+            ticks: { callback: (v) => (v / 10000).toFixed(0) + '만' },
+            grid: { color: '#f0f0f0' },
+          },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  // ── 이벤트 ──
+
+  document.getElementById('createBtn').addEventListener('click', createBuild);
+  document.getElementById('addPartBtn').addEventListener('click', addPart);
+  document.querySelectorAll('[data-days]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedDays = btn.dataset.days ? Number(btn.dataset.days) : null;
+      if (selectedBuildId) loadTrend();
+    });
+  });
+
+  loadBuilds();
+</script>
+</body>
+</html>

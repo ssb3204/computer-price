@@ -3,9 +3,9 @@
 조합은 공개 게시물이라 읽기와 쓰기의 경로·권한이 다르다.
 
   읽기 (누구나)
-    GET    /builds                              공개 조합 목록 (최신순)
-    GET    /builds/{build_id}                   조합 상세 (부품 목록 포함)
-    GET    /builds/{build_id}/price-trend       총액 추이 (?days=30)
+    GET    /api/builds                          공개 조합 목록 (최신순)
+    GET    /api/builds/{build_id}               조합 상세 (부품 목록 포함)
+    GET    /api/builds/{build_id}/price-trend   총액 추이 (?days=30)
 
   쓰기 (작성자만)
     POST   /users/{user_id}/builds                          조합 생성
@@ -16,6 +16,11 @@
     GET    /users/{user_id}/builds                          내 조합 목록
 
 쓰기 경로가 /users/{user_id}/ 아래인 것은 기존 워치리스트 라우터 관례를 따른 것이다.
+
+공개 읽기만 /api 접두사를 쓰는 이유: 이 프로젝트는 페이지가 짧은 명사 경로를
+차지한다(/home, /watchlist, /mypage). 조합 페이지도 /builds 여야 일관되는데,
+공개 목록 API 를 /builds 에 두면 같은 경로·메서드로 충돌한다. 쓰기 경로는
+/users/ 아래라 충돌하지 않으므로 그대로 둔다.
 """
 from __future__ import annotations
 
@@ -39,7 +44,7 @@ from src.common.config import MySQLSettings
 
 logger = logging.getLogger(__name__)
 
-public_build_router = APIRouter(prefix="/builds", tags=["builds"])
+public_build_router = APIRouter(prefix="/api/builds", tags=["builds"])
 user_build_router = APIRouter(prefix="/users", tags=["builds"])
 
 MAX_PAGE_SIZE = 100
