@@ -79,8 +79,9 @@ computer_price/
 │   ├── common/          # 공유 모듈 (models, config, mysql_client)
 │   ├── crawlers/        # 사이트별 크롤러 (다나와, 컴퓨존, 견적왕)
 │   ├── pipeline/        # 파이프라인 스텝 (crawl, load_raw, transform, quality, detect, analytics, slack)
-│   └── api/             # FastAPI (users, watchlist)
-│       └── static/      # 웹 UI (로그인/회원가입/홈/마이페이지/워치리스트)
+│   └── api/             # FastAPI (users, watchlist, builds)
+│       └── static/      # 웹 UI (로그인/회원가입/홈/마이페이지/워치리스트/부품조합)
+│           └── vendor/  # Chart.js (CDN 미사용)
 ├── mysql/               # MySQL DDL (3-Layer)
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
@@ -107,9 +108,14 @@ computer_price/
 - **ans_daily_price_stats** — 일별 최저/최고/평균 가격
   - 주별/전체기간 통계는 별도 테이블 없이 이 테이블을 즉석 GROUP BY 해서 구한다
 
-### Users
+### Users / Builds (접두사 없음 — 사용자 데이터)
 - **users** — 회원 계정
 - **user_watchlist** — 사용자와 관심 상품 연결
+- **builds** — 부품 조합(공개 게시물). `UNIQUE(user_id, name)`
+- **build_items** — 조합과 상품 연결. 조합 삭제 시 `ON DELETE CASCADE`
+
+조합 총액 이력은 별도 테이블로 두지 않고 `stg_price_history`에서 즉석 집계한다
+(일별 1점 기준 연 수천 행 규모라 캐시 테이블 이득이 없다. 근거는 `docs/benchmark_results.md`).
 
 ## 웹 UI (localhost:8001)
 
@@ -120,7 +126,22 @@ computer_price/
 | 홈 | `/home` | 메인 화면 |
 | 마이페이지 | `/mypage` | 프로필 관리 |
 | 워치리스트 | `/watchlist` | 관심 상품 검색·추가·삭제, 가격 이력 조회 |
+| 부품 조합 | `/builds` | 조합 둘러보기, 총액 추이 차트, 부품 관리 |
 | API 문서 | `/docs` | FastAPI 자동 생성 문서 |
+
+### 부품 조합 (공개 게시물)
+
+여러 부품을 묶어 이름을 붙이고, 그 조합의 **총액이 어떻게 변해왔는지** 본다.
+조합은 게시물처럼 **누구나 볼 수 있고, 수정은 만든 사람만** 할 수 있다.
+
+총액 추이 집계 규칙:
+
+- 하루가 한 점. 같은 날 여러 번 크롤링되므로 그날 마지막 값을 쓴다
+- 수집이 없는 날은 직전 가격을 이어 쓴다(forward fill) — 크롤링 실패로 선이 끊기지 않게
+- **모든 부품이 가격을 가진 날부터** 그린다. 있는 것만 더하면 뒤늦게 담긴 부품이
+  합류하는 날 총액이 급등해 가격이 오른 것처럼 보인다
+
+차트는 Chart.js를 `src/api/static/vendor/`에 넣어 쓴다(CDN 미사용).
 
 ## 알림 기준
 
