@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import REQUEST_TIMEOUT, BaseCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _get_search_token(session: requests.Session, query: str) -> str | None:
     확인했다(요청받은 버그 리포트의 "9070 검색 시 29개" — 전체탭 기준 개수).
     """
     try:
-        resp = session.post(SEARCH_TOKEN_URL, data={"main_search": query}, timeout=30)
+        resp = session.post(SEARCH_TOKEN_URL, data={"main_search": query}, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         resp.encoding = "euc-kr"
     except requests.RequestException as e:
@@ -110,7 +110,7 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
         }
         try:
             resp = session.post(
-                LIST_URL, data=form_data, timeout=30, headers={"Referer": SEARCH_TOKEN_URL}
+                LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT, headers={"Referer": SEARCH_TOKEN_URL}
             )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
@@ -164,7 +164,7 @@ def crawl_single(
             "search_word": query, "page": str(page), "view_type": "list",
         }
         try:
-            resp = session.post(LIST_URL, data=form_data, timeout=30)
+            resp = session.post(LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             resp.encoding = "euc-kr"
         except requests.RequestException as e:
@@ -231,7 +231,7 @@ class PCEstimateCrawler(BaseCrawler):
             "view_type": "list",
         }
         try:
-            resp = self._session.post(LIST_URL, data=form_data, timeout=30)
+            resp = self._session.post(LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             resp.encoding = "euc-kr"
             return resp.text

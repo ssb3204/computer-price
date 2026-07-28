@@ -146,10 +146,11 @@ flowchart LR
 ```mermaid
 flowchart TD
     START["crawl_all_sites(settings)"]
-    CONN["Snowflake 연결 생성"]
-    MAKE["3개 크롤러 객체 생성<br/>DanawaCrawler(conn)<br/>CompuzoneCrawler(conn)<br/>PCEstimateCrawler(conn)"]
 
-    LOOP{"for crawler in crawlers"}
+    LOOP{"for crawler_cls in<br/>(Danawa, Compuzone, PCEstimate)"}
+    CONN["MySQL 연결 생성<br/>(크롤러마다 새로)"]
+    MAKE["crawler_cls(conn=conn)"]
+    CLOSE["연결 종료"]
 
     CALL["crawler.crawl_raw()"]
     LWP["_load_watch_products()<br/>WATCHLIST에서 활성 상품 조회"]
@@ -162,11 +163,11 @@ flowchart TD
 
     RET["return (all_raw, crawl_failures)"]
 
-    WL[("STAGING.WATCHLIST")]
+    WL[("stg_watchlist")]
     SITE[/"다나와/컴퓨존/견적왕<br/>웹사이트"/]
 
-    START --> CONN --> MAKE --> LOOP
-    LOOP --> CALL
+    START --> LOOP
+    LOOP --> CONN --> MAKE --> CALL
     CALL --> LWP
     LWP -.-> WL
     LWP --> FETCH
@@ -176,10 +177,16 @@ flowchart TD
     RAW_OBJ --> CALL
     CALL -->|"성공"| OK
     CALL -->|"예외 발생 or 0건"| FAIL
-    OK --> LOOP
-    FAIL --> LOOP
+    OK --> CLOSE
+    FAIL --> CLOSE
+    CLOSE --> LOOP
     LOOP -->|"3개 끝"| RET
 ```
+
+> 커넥션을 크롤러 하나마다 열고 닫는 이유: 커넥션의 유일한 사용처는 `_load_watch_products()`
+> 뿐이라, 하나를 3개 크롤러에 걸쳐 재사용하면 앞선 사이트가 무응답으로 수 분간 붙들려 있는
+> 동안 유휴 커넥션이 끊겨 뒤 사이트가 `(2006) MySQL server has gone away`로 죽는다.
+> (2026-07-28 장애)
 
 ---
 

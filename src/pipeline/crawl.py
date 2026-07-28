@@ -3,8 +3,6 @@
 import logging
 from datetime import UTC, datetime
 
-import requests
-
 from src.common.config import MySQLSettings
 from src.common.models import RawCrawledPrice
 from src.common.mysql_client import get_connection
@@ -19,17 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], list[dict]]:
-    """3개 사이트를 순서대로 크롤링. 실패한 사이트는 crawl_failures에 기록."""
+    """3개 사이트를 순서대로 크롤링. 실패한 사이트는 crawl_failures에 기록.
+
+    커넥션은 크롤러마다 새로 연다. 커넥션의 유일한 사용처는 crawl_raw() 첫머리의
+    워치리스트 조회뿐인데, 하나를 3개 크롤러에 걸쳐 재사용하면 앞선 사이트가
+    무응답으로 수 분간 붙들려 있는 동안 유휴 커넥션이 경로 중간에서 끊긴다.
+    (2026-07-28 장애: 컴퓨존 5분 타임아웃 → 견적왕이 죽은 커넥션을 물려받아 2006)
+    """
     all_raw: list[RawCrawledPrice] = []
     crawl_failures: list[dict] = []
 
-    with get_connection(settings) as conn:
-        crawlers = [
-            DanawaCrawler(conn=conn),
-            CompuzoneCrawler(conn=conn),
-            PCEstimateCrawler(conn=conn),
-        ]
-        for crawler in crawlers:
+    # 모듈 전역이 아닌 호출 시점에 해석한다 — 테스트가 클래스를 patch할 수 있어야 한다.
+    crawler_classes = (DanawaCrawler, CompuzoneCrawler, PCEstimateCrawler)
+
+    for crawler_cls in crawler_classes:
+        with get_connection(settings) as conn:
+            crawler = crawler_cls(conn=conn)
             try:
                 raw_prices = crawler.crawl_raw()
                 all_raw.extend(raw_prices)
@@ -41,7 +44,11 @@ def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], lis
                         "error": "크롤링 결과 0건 — 페이지 구조 변경 의심",
                         "failed_at": failed_at,
                     })
-            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as e:
+            # 사이트 하나의 실패가 나머지 사이트와 이미 수집한 데이터를 죽이면 안 된다.
+            # 예외 종류를 좁게 나열하면 목록 밖 예외(2026-07-28: pymysql
+            # OperationalError)가 전파돼 파이프라인 전체가 중단된다. 여기서 삼킨
+            # 예외는 로그와 crawl_failures(→ Slack 알림)에 남으므로 조용히 묻히지 않는다.
+            except Exception as e:
                 failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                 crawl_failures.append({
                     "site_name": crawler.site_name,

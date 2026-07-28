@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import BaseCrawler
+from src.crawlers.base import REQUEST_TIMEOUT, BaseCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class SearchResult:
 def _fetch_product_title(url: str) -> str | None:
     """상세 페이지 <title>에서 용량 포함 전체 상품명을 추출한다."""
     try:
-        resp = requests.get(url, timeout=10, stream=True)
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT, stream=True)
         resp.raise_for_status()
         buf = b""
         for chunk in resp.iter_content(chunk_size=4096):
@@ -72,7 +72,7 @@ def _fetch_price_from_detail(product_no: str) -> tuple[str, str] | None:
     """
     url = f"{DETAIL_BASE}?ProductNo={product_no}"
     try:
-        resp = requests.get(url, timeout=15, stream=True)
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT, stream=True)
         resp.raise_for_status()
         buf = b""
         for chunk in resp.iter_content(chunk_size=8192):
@@ -167,7 +167,7 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
             resp = session.get(
                 SEARCH_URL,
                 params=params,
-                timeout=30,
+                timeout=REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
@@ -216,7 +216,7 @@ def crawl_single(
                 resp = session.post(
                     LIST_URL,
                     data=_build_list_form(medium_div_no, page=page),
-                    timeout=30,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 resp.raise_for_status()
                 resp.encoding = "euc-kr"
@@ -254,7 +254,7 @@ def crawl_single(
         if medium_div_no:
             params["MediumDivNo"] = medium_div_no
         try:
-            resp = session.get(SEARCH_URL, params=params, timeout=30)
+            resp = session.get(SEARCH_URL, params=params, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             resp.encoding = "euc-kr"
         except requests.RequestException as e:
@@ -331,7 +331,7 @@ class CompuzoneCrawler(BaseCrawler):
             resp = self._session.post(
                 LIST_URL,
                 data=_build_list_form(medium_div_no, page=page),
-                timeout=30,
+                timeout=REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
@@ -351,7 +351,7 @@ class CompuzoneCrawler(BaseCrawler):
                 params["MediumDivNo"] = medium_div_no
             try:
                 self._rate_limit()
-                resp = session.get(SEARCH_URL, params=params, timeout=30)
+                resp = session.get(SEARCH_URL, params=params, timeout=REQUEST_TIMEOUT)
                 resp.raise_for_status()
                 resp.encoding = "euc-kr"
             except requests.RequestException as e:
