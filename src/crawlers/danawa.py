@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup, Tag
 from pymysql.connections import Connection
 
 from src.common.models import RawCrawledPrice
-from src.crawlers.base import DEFAULT_HEADERS, BaseCrawler
+from src.crawlers.base import DEFAULT_HEADERS, REQUEST_TIMEOUT, BaseCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def _fetch_product_title(pcode: str) -> str | None:
         resp = requests.get(
             f"{PRODUCT_BASE}{pcode}",
             headers=DEFAULT_HEADERS,
-            timeout=10,
+            timeout=REQUEST_TIMEOUT,
             stream=True,
         )
         resp.raise_for_status()
@@ -172,7 +172,7 @@ def search_products(query: str, max_results: int = 10, category: str | None = No
     for page in range(1, MAX_SEARCH_PAGES + 1):
         url = f"{SEARCH_URL}?query={query}&tab=goods&page={page}"
         try:
-            resp = session.get(url, timeout=30)
+            resp = session.get(url, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             resp.encoding = "utf-8"
         except requests.RequestException as e:
@@ -209,7 +209,7 @@ def crawl_single(
     session.headers.update(DEFAULT_HEADERS)
     url = f"{SEARCH_URL}?query={query}&tab=goods"
     try:
-        resp = session.get(url, timeout=30)
+        resp = session.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         resp.encoding = "utf-8"
     except requests.RequestException as e:

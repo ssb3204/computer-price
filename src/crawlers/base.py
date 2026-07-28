@@ -19,6 +19,12 @@ REQUEST_DELAY_SECONDS = 2.0
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 2.0
 
+# (connect, read) — requests에 단일 값을 주면 두 단계에 같은 값이 적용된다.
+# 무응답 호스트는 connect 단계에서 걸리므로 connect가 실패까지의 시간을 지배한다.
+# 살아 있는 서버라면 TCP 연결은 1초 안에 끝나므로 5초면 충분히 여유롭고,
+# 응답 자체가 느린 경우(대용량 목록 페이지)는 read 쪽에서 받아준다.
+REQUEST_TIMEOUT = (5.0, 20.0)
+
 
 class BaseCrawler(ABC):
     def __init__(self) -> None:
@@ -37,7 +43,7 @@ class BaseCrawler(ABC):
         for attempt in range(MAX_RETRIES):
             self._rate_limit()
             try:
-                resp = self._session.get(url, timeout=30)
+                resp = self._session.get(url, timeout=REQUEST_TIMEOUT)
                 resp.raise_for_status()
                 resp.encoding = "utf-8"
                 return resp.text
