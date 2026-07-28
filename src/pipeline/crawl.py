@@ -3,8 +3,6 @@
 import logging
 from datetime import UTC, datetime
 
-import requests
-
 from src.common.config import MySQLSettings
 from src.common.models import RawCrawledPrice
 from src.common.mysql_client import get_connection
@@ -46,7 +44,11 @@ def crawl_all_sites(settings: MySQLSettings) -> tuple[list[RawCrawledPrice], lis
                         "error": "크롤링 결과 0건 — 페이지 구조 변경 의심",
                         "failed_at": failed_at,
                     })
-            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as e:
+            # 사이트 하나의 실패가 나머지 사이트와 이미 수집한 데이터를 죽이면 안 된다.
+            # 예외 종류를 좁게 나열하면 목록 밖 예외(2026-07-28: pymysql
+            # OperationalError)가 전파돼 파이프라인 전체가 중단된다. 여기서 삼킨
+            # 예외는 로그와 crawl_failures(→ Slack 알림)에 남으므로 조용히 묻히지 않는다.
+            except Exception as e:
                 failed_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
                 crawl_failures.append({
                     "site_name": crawler.site_name,
