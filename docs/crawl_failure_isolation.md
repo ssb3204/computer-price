@@ -1,5 +1,11 @@
 # 크롤링 실패 격리 설계 — try-except vs GitHub Actions 별도 job
 
+> **2026-07-28 갱신** — 이 문서가 기록한 방향(단일 job + try-except)은 유지되지만,
+> 당시 구현에는 두 가지 누수가 있었고 실제 장애로 드러났다:
+> 좁은 except 목록, 그리고 3개 크롤러가 공유하던 MySQL 커넥션.
+> 아래 방법 B 코드와 "커넥션 1개" 항목은 현재 구조와 다르다 —
+> [adr_20260728_crawl_resilience.md](adr_20260728_crawl_resilience.md) 참조.
+
 ## 문제 상황
 
 3개 사이트(다나와·컴퓨존·견적왕) 크롤링이 단일 실행 흐름으로 묶여 있어,
@@ -58,9 +64,12 @@ for crawler in [DanawaCrawler, CompuzoneCrawler, PCEstimateCrawler]:
 
 **장점:**
 - Python 객체(`all_raw`, `crawl_failures`) 그대로 다음 단계에 전달
-- Snowflake 커넥션 1개
 - 실패 사이트와 무관하게 transform 항상 실행
 - 코드 한 곳에서 전체 흐름 제어
+
+> ~~커넥션 1개~~ — 2026-07-28 철회. 커넥션 공유는 장점이 아니라 은닉된 결합이었다.
+> 한 사이트가 무응답으로 5분간 붙들려 있는 동안 유휴 커넥션이 끊겨 뒤 사이트가
+> `(2006) MySQL server has gone away`로 죽었다. 현재는 크롤러마다 열고 닫는다.
 
 **종료 코드 전략:**
 ```

@@ -65,6 +65,17 @@
 - **컴퓨존/견적왕**: AJAX POST 요청으로 JSON 직접 수신 (EUC-KR 인코딩 처리 필요)
 - **다나와**: HTML 파싱, `productItem*` 클래스만 선택 (광고 상품 `adReaderProductItem*` 제외)
 
+### 크롤링 회복력 — 커넥션 수명 · 타임아웃 예산 · 실패 격리 (2026-07-28)
+- **문제**: 컴퓨존이 GitHub 러너 IP에 무응답 → `timeout=30`(connect/read 공통값)을 꽉 채워
+  대상당 77초 × 4건 = 5분 소요. 그동안 3개 크롤러가 공유하던 MySQL 커넥션이 유휴 상태로
+  끊겨 견적왕이 `(2006) MySQL server has gone away`로 죽고, 좁은 except 목록을 통과한
+  그 예외가 파이프라인 전체를 exit 1로 만들어 수집 완료된 다나와 1건까지 유실
+- **변경**: ⓐ 커넥션을 크롤러마다 열고 닫음 ⓑ `REQUEST_TIMEOUT = (5.0, 20.0)`으로 connect/read
+  분리(12곳 교체) ⓒ 사이트 단위 격리를 `except Exception`으로 확대
+- **기각한 대안**: 커넥션 풀 — 이 장애는 커넥션 부족이 아니라 유휴 커넥션 사망이므로
+  풀은 병을 키운다. 실제로 문제를 푸는 건 풀이 아니라 체크아웃 시 ping이다
+- **상세**: [adr_20260728_crawl_resilience.md](adr_20260728_crawl_resilience.md)
+
 ### 크롤링 실패 처리
 - **방식**: 사이트별 개별 try-except. 1개 사이트 실패해도 나머지 계속 진행
 - **알림**: 실패 시 Slack Webhook으로 사이트명/시간/에러 전송
