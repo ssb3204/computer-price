@@ -168,13 +168,19 @@ def probe_detail_path(target: Target) -> PathResult:
     return PathResult("③ 상세", True, 1, elapsed, 1, None, f"{price}원 | {name[:40]}")
 
 
-def diagnose(target: Target, save: bool) -> list[PathResult]:
+def diagnose(target: Target, save: bool, all_paths: bool = False) -> list[PathResult]:
+    """운영과 같은 순서로 경로를 시도한다.
+
+    all_paths=True면 앞 경로가 성공해도 나머지를 계속 측정한다.
+    운영 순서대로만 돌리면 1차가 늘 성공하는 동안 2·3차가 살아 있는지
+    영영 알 수 없다 — 경로를 제거·재배치하려면 각 경로의 독립 성공률이 필요하다.
+    """
     session = requests.Session()
     results = [probe_list_path(session, target, save)]
-    if not results[0].found:
+    if all_paths or not results[-1].found:
         results.append(probe_search_path(session, target, save))
-        if not results[-1].found:
-            results.append(probe_detail_path(target))
+    if all_paths or not results[-1].found:
+        results.append(probe_detail_path(target))
     return results
 
 
@@ -194,6 +200,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="컴퓨존 크롤링 경로 진단")
     parser.add_argument("--save-html", action="store_true",
                         help="응답 HTML을 tmp/에 저장 (셀렉터 변경 시 diff용)")
+    parser.add_argument("--all-paths", action="store_true",
+                        help="앞 경로가 성공해도 모든 경로를 측정 (경로별 독립 성공률 확인)")
     args = parser.parse_args()
 
     load_dotenv()
@@ -205,7 +213,7 @@ def main() -> int:
     print(f"=== 컴퓨존 진단 — 대상 {len(targets)}건 ===")
     failed = 0
     for target in targets:
-        results = diagnose(target, args.save_html)
+        results = diagnose(target, args.save_html, args.all_paths)
         report(target, results)
         if not any(r.found for r in results):
             failed += 1
