@@ -7,6 +7,7 @@
 from unittest.mock import patch
 
 from src.crawlers.pc_estimate import CATEGORY_TO_CATE2, MAX_SEARCH_PAGES, PCEstimateCrawler
+from tests.unit.conftest import FakeClock
 
 # ── HTML fixture 빌더 ────────────────────────────────────────────────────────
 
@@ -54,6 +55,29 @@ class TestCrawlRaw:
         assert raw.price_text == "450,000원"
         assert raw.url == "https://kjwwang.com/shop/view.html?pd_no=1001"
         assert raw.crawled_at is not None
+
+    def test_all_targets_share_one_crawled_at(self, make_watch_conn):
+        """한 크롤링 회차의 모든 상품은 같은 crawled_at 을 가져야 한다.
+
+        대상·페이지마다 now() 를 부르면 같은 회차인데 시각이 갈린다.
+        stg_price_history 자연키가 (product_id, crawled_at) 이라 하위 계층의
+        시계열 정렬과 일별 집계가 이 값에 직접 의존한다.
+        """
+        conn = make_watch_conn([
+            ("라이젠 7800X3D", "1001", "CPU", "AMD"),
+            ("RTX 5070", "1002", "GPU", "NVIDIA"),
+        ])
+        crawler = PCEstimateCrawler(conn=conn)
+        page = _page(_item("1001"), _item("1002"))
+
+        with (
+            patch.object(crawler, "_fetch_search_html", return_value=page),
+            patch("src.crawlers.pc_estimate.datetime", FakeClock()),
+        ):
+            results = crawler.crawl_raw()
+
+        assert len(results) == 2
+        assert results[0].crawled_at == results[1].crawled_at
 
     def test_site_field_is_kjwwang_not_korean_name(self, make_watch_conn):
         """저장되는 site 값은 'kjwwang' 이다.

@@ -265,6 +265,10 @@ class DanawaCrawler(BaseCrawler):
         """Raw 데이터 수집 — WATCHLIST 기반."""
         targets = self._load_watch_products()
         all_raw: list[RawCrawledPrice] = []
+        # 회차 시각은 한 번만 정한다. 대상마다 now() 를 부르면 같은 회차인데
+        # 상품별로 crawled_at 이 갈리고, stg_price_history 자연키가
+        # (product_id, crawled_at) 이라 하위 계층의 시계열이 그만큼 어긋난다.
+        now = datetime.now(UTC)
 
         for target in targets:
             url = f"{SEARCH_URL}?query={target['query']}&tab=goods"
@@ -272,7 +276,6 @@ class DanawaCrawler(BaseCrawler):
             if html is None:
                 continue
             soup = BeautifulSoup(html, "html.parser")
-            now = datetime.now(UTC)
 
             for item in soup.select("li.prod_item"):
                 if not _is_real_product(item):

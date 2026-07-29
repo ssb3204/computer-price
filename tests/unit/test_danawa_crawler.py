@@ -17,6 +17,7 @@ from src.crawlers.danawa import (
     _extract_url,
     _is_real_product,
 )
+from tests.unit.conftest import FakeClock
 
 # ── HTML fixture 빌더 ────────────────────────────────────────────────────────
 
@@ -137,6 +138,29 @@ class TestCrawlRaw:
             results = crawler.crawl_raw()
 
         assert results == []
+
+    def test_all_targets_share_one_crawled_at(self, make_watch_conn):
+        """한 크롤링 회차의 모든 상품은 같은 crawled_at 을 가져야 한다.
+
+        대상마다 now() 를 부르면 같은 회차인데 시각이 갈린다.
+        stg_price_history 자연키가 (product_id, crawled_at) 이라 하위 계층의
+        시계열 정렬과 일별 집계가 이 값에 직접 의존한다.
+        """
+        conn = make_watch_conn([
+            ("라이젠 7800X3D", "19627934", "CPU", "AMD"),
+            ("RTX 5070", "77379452", "GPU", "NVIDIA"),
+        ])
+        crawler = DanawaCrawler(conn=conn)
+        page = _search_page(_product_li("19627934"), _product_li("77379452"))
+
+        with (
+            patch.object(crawler, "_fetch_with_retry", return_value=page),
+            patch("src.crawlers.danawa.datetime", FakeClock()),
+        ):
+            results = crawler.crawl_raw()
+
+        assert len(results) == 2
+        assert results[0].crawled_at == results[1].crawled_at
 
     def test_ad_item_with_same_pcode_is_skipped(self, make_watch_conn):
         """pcode 가 같아도 광고 아이템이면 건너뛰고 실제 상품을 집는다."""

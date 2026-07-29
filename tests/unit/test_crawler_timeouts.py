@@ -11,7 +11,7 @@
 
 import re
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,24 +44,13 @@ class TestTimeoutBudget:
 class TestCrawlersUseSharedTimeout:
     """각 크롤러의 실제 HTTP 호출이 공유 상수를 넘기는지 검증한다."""
 
-    def test_compuzone_category_fetch(self, make_watch_conn):
+    def test_compuzone_search(self, make_watch_conn):
         crawler = CompuzoneCrawler(conn=make_watch_conn([]))
         crawler._session = MagicMock()
 
-        crawler._fetch_category_html("1014")
+        crawler._fetch_search_html("adata", "1276")
 
-        assert crawler._session.post.call_args.kwargs["timeout"] == REQUEST_TIMEOUT
-
-    def test_compuzone_search_fallback(self, make_watch_conn):
-        crawler = CompuzoneCrawler(conn=make_watch_conn([]))
-        session = MagicMock()
-        session.get.return_value.text = "<html></html>"
-        target = {"query": "adata", "product_no": "1310609", "category": "SSD", "brand": None}
-
-        with patch("src.crawlers.compuzone.requests.Session", return_value=session):
-            crawler._search_product_price(target)
-
-        assert session.get.call_args.kwargs["timeout"] == REQUEST_TIMEOUT
+        assert crawler._session.get.call_args.kwargs["timeout"] == REQUEST_TIMEOUT
 
     def test_pc_estimate_search(self, make_watch_conn):
         crawler = PCEstimateCrawler(conn=make_watch_conn([]))

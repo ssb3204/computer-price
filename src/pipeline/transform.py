@@ -102,14 +102,23 @@ def transform_staging(settings: MySQLSettings) -> int:
              for _, site_display, category, name, url, _, _ in parsed],
         )
 
-        # product_id 매핑 조회
+        # product_id 매핑 조회.
+        # stg_products의 UNIQUE(site, product_name)는 utf8mb4_0900_ai_ci(대소문자 무시)라
+        # 대소문자만 다른 이름은 한 행으로 합쳐진다. 파이썬 dict는 대소문자를 구분하므로
+        # 키 양쪽을 lower()로 맞춰야 합쳐진 쪽 이름으로도 조회된다.
         cur.execute("SELECT `product_id`, `site`, `product_name` FROM `stg_products`")
-        product_map = {(row[1], row[2]): row[0] for row in cur.fetchall()}
+        product_map = {(row[1], row[2].lower()): row[0] for row in cur.fetchall()}
 
         daily_rows = []
         for raw_id, site_display, category, name, url, price, crawled_at in parsed:
-            product_id = product_map.get((site_display, name))
+            product_id = product_map.get((site_display, name.lower()))
             if product_id is None:
+                # 도달하면 안 되는 경로 — 바로 위에서 UPSERT한 상품이 조회되지 않은 것.
+                # 조용히 버리면 해당 raw 행이 미처리로 남아 매 실행 재조회되므로 반드시 남긴다.
+                logger.error(
+                    "[Staging] product_id 매핑 실패 — raw_id=%s site=%s name=%s",
+                    raw_id, site_display, name[:60],
+                )
                 continue
             daily_rows.append((product_id, raw_id, price, crawled_at))
 
