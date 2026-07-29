@@ -59,10 +59,21 @@ run_pipeline.py      # 파이프라인 전체 실행 진입점
 
 ## 기술적 주의사항
 - 다나와 크롤러: productItem* = 실제상품, adReaderProductItem*/adPointProductItem* = 광고
-- 컴퓨존 크롤러: crawl_single의 1차 경로만 product_list.php POST(EUC-KR, li.li-obj 파싱).
-  검색(search_products)은 GET — 의도된 비대칭이니 통일하지 말 것.
-  3단계 fallback: ① product_list.php POST → ② search_list.php GET → ③ 상세페이지 정규식.
-  브라우저에 보이는 div.prdbx는 AJAX 셸이라 직접 크롤링 불가 — 셀렉터 변경 금지.
+- 컴퓨존 크롤러: 3사 공통으로 단일 경로다 — search_list.php GET(EUC-KR, li.li-obj 파싱)에서
+  검색어+MediumDivNo로 조회 후 ProductNo 정확매칭. fallback 없음.
+  브라우저에 보이는 div.prdbx는 AJAX 렌더링 후 DOM이라 직접 크롤링 불가 — 셀렉터 변경 금지.
+  확인은 개발자도구 Elements가 아니라 Network 탭의 Response로 한다.
+  (구 3단계 fallback은 2026-07-29 제거: ①카테고리목록은 검색어를 안 써 추천순 100위 밖이면
+   실패했고 검색 경로가 그 상위집합임을 실측 확인, ③상세페이지는 <title> 기반이라 상품명에
+   용량·옵션이 덧붙어 같은 상품이 stg_products에서 둘로 갈라졌다)
+- 크롤링 대상은 3사 모두 stg_watchlist에서 로드하고, 사이트 고유 ID(pcode/ProductNo/pd_no)로
+  정확매칭한다. 이름 유사도 매칭이 아니다.
+- crawled_at은 crawl_raw() 진입 시 한 번만 정해 그 회차 전체에 쓴다. 대상·페이지 루프 안에서
+  now()를 부르면 같은 회차인데 상품마다 시각이 갈리고, stg_price_history 자연키가
+  (product_id, crawled_at)이라 하위 시계열·일별 집계가 어긋난다.
+- 크롤러 진단: python scripts/diagnose_compuzone.py [--all-paths] [--save-html]
+  — 0건일 때 원인이 요청 계약/셀렉터/스캔 범위 중 무엇인지 구분해준다.
+  단 로컬에서는 항상 통과한다(운영 실패는 GitHub Actions IP 차단 성격).
 - Frozen dataclass로 모든 DTO 정의
 - DB 접속: src/common/mysql_client.py의 get_connection 사용, 드라이버는 pymysql.
   접속 계정은 .env의 price_app만 사용 — root 금지. 새 추상화 계층(ABC/팩토리)을 만들지 않는다.
