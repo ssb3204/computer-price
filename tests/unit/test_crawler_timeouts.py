@@ -10,6 +10,7 @@
 """
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -59,7 +60,7 @@ class TestCrawlersUseSharedTimeout:
         target = {"query": "adata", "product_no": "1310609", "category": "SSD", "brand": None}
 
         with patch("src.crawlers.compuzone.requests.Session", return_value=session):
-            crawler._search_product_price(target)
+            crawler._search_product_price(target, datetime(2026, 1, 1, tzinfo=UTC))
 
         assert session.get.call_args.kwargs["timeout"] == REQUEST_TIMEOUT
 

@@ -12,6 +12,7 @@ import pytest
 
 from src.common.models import RawCrawledPrice
 from src.crawlers.compuzone import CATEGORY_MEDIUM_DIV_NO, MAX_CRAWL_PAGES, CompuzoneCrawler
+from tests.unit.conftest import FakeClock
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +78,30 @@ class TestCategoryListPath:
         assert "ProductNo=100001" in raw.url
         assert raw.url.startswith("https://www.compuzone.co.kr/")
         assert raw.crawled_at is not None
+
+    def test_all_targets_share_one_crawled_at(self, make_watch_conn):
+        """한 크롤링 회차의 모든 상품은 같은 crawled_at 을 가져야 한다.
+
+        대상·페이지마다 now() 를 부르면 같은 회차인데 시각이 갈린다. 실제로
+        운영 DB에서 컴퓨존 한 회차가 4개의 서로 다른 crawled_at 을 만들고 있었다.
+        stg_price_history 의 자연키가 (product_id, crawled_at) 이라 하위 계층의
+        시계열 정렬과 일별 집계가 이 값에 직접 의존한다.
+        """
+        conn = make_watch_conn([
+            ("라이젠 7800X3D", "100001", "CPU", "AMD"),
+            ("라이젠 9800X3D", "100002", "CPU", "AMD"),
+        ])
+        crawler = CompuzoneCrawler(conn=conn)
+        page = _page(_item("100001"), _item("100002"))
+
+        with (
+            patch.object(crawler, "_fetch_category_html", return_value=page),
+            patch("src.crawlers.compuzone.datetime", FakeClock()),
+        ):
+            results = crawler.crawl_raw()
+
+        assert len(results) == 2
+        assert results[0].crawled_at == results[1].crawled_at
 
     def test_non_matching_product_no_is_ignored(self, make_watch_conn):
         """워치리스트 ProductNo 와 다른 상품은 수집하지 않는다.

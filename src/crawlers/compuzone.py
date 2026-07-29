@@ -340,8 +340,14 @@ class CompuzoneCrawler(BaseCrawler):
             logger.exception("Failed to fetch %s category %s", self.site_name, medium_div_no)
             return None
 
-    def _search_product_price(self, target: dict) -> "RawCrawledPrice | None":
-        """검색 API로 특정 ProductNo 상품의 가격을 찾는다 (카테고리 리스트 fallback)."""
+    def _search_product_price(
+        self, target: dict, crawled_at: datetime
+    ) -> "RawCrawledPrice | None":
+        """검색 API로 특정 ProductNo 상품의 가격을 찾는다 (카테고리 리스트 fallback).
+
+        crawled_at 은 회차 시각을 그대로 받는다 — 여기서 now() 를 다시 부르면
+        같은 회차인데 fallback 을 탄 상품만 수집 시각이 달라진다.
+        """
         medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(target["category"], "")
         session = requests.Session()
 
@@ -363,7 +369,6 @@ class CompuzoneCrawler(BaseCrawler):
             if not items:
                 break
 
-            now = datetime.now(UTC)
             for item in items:
                 pno = item.get("id", "").replace("li-pno-", "")
                 if pno != target["product_no"]:
@@ -383,7 +388,7 @@ class CompuzoneCrawler(BaseCrawler):
                     product_name=name_tag.get_text(strip=True),
                     price_text=raw_price,
                     brand=target["brand"], url=product_url,
-                    crawled_at=now,
+                    crawled_at=crawled_at,
                 )
         return None
 
@@ -391,6 +396,11 @@ class CompuzoneCrawler(BaseCrawler):
         """Raw 데이터 수집 — WATCHLIST 기반."""
         targets = self._load_watch_products()
         all_raw: list[RawCrawledPrice] = []
+        # 회차 시각은 한 번만 정하고 3개 경로 전부에 그대로 넘긴다. 대상·페이지마다
+        # now() 를 부르면 같은 회차인데 상품별로 crawled_at 이 갈리고,
+        # stg_price_history 자연키가 (product_id, crawled_at) 이라 하위 계층의
+        # 시계열이 그만큼 어긋난다. (운영 DB에서 한 회차가 4개 시각으로 갈려 있었음)
+        now = datetime.now(UTC)
 
         for target in targets:
             medium_div_no = CATEGORY_MEDIUM_DIV_NO.get(target["category"])
@@ -409,7 +419,6 @@ class CompuzoneCrawler(BaseCrawler):
                 if not items:
                     break
 
-                now = datetime.now(UTC)
                 for item in items:
                     pno = item.get("id", "").replace("li-pno-", "")
                     if pno != target["product_no"]:
@@ -444,7 +453,7 @@ class CompuzoneCrawler(BaseCrawler):
                     "카테고리 리스트 미발견, 검색 fallback: %s (ProductNo=%s)",
                     target["query"], target["product_no"],
                 )
-                result = self._search_product_price(target)
+                result = self._search_product_price(target, now)
                 if result:
                     all_raw.append(result)
                 else:
@@ -461,7 +470,7 @@ class CompuzoneCrawler(BaseCrawler):
                             site="compuzone", category=target["category"],
                             product_name=name, price_text=price_str,
                             brand=target["brand"], url=product_url,
-                            crawled_at=datetime.now(UTC),
+                            crawled_at=now,
                         ))
                         logger.info(
                             "상세 페이지 fallback 성공: %s (ProductNo=%s)",

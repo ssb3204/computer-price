@@ -243,6 +243,10 @@ class PCEstimateCrawler(BaseCrawler):
         """Raw 데이터 수집 — WATCHLIST 기반."""
         targets = self._load_watch_products()
         all_raw: list[RawCrawledPrice] = []
+        # 회차 시각은 한 번만 정한다. 대상·페이지마다 now() 를 부르면 같은 회차인데
+        # 상품별로 crawled_at 이 갈리고, stg_price_history 자연키가
+        # (product_id, crawled_at) 이라 하위 계층의 시계열이 그만큼 어긋난다.
+        now = datetime.now(UTC)
 
         for target in targets:
             cate2 = CATEGORY_TO_CATE2.get(target["category"])
@@ -261,7 +265,6 @@ class PCEstimateCrawler(BaseCrawler):
                 if not items:
                     break
 
-                now = datetime.now(UTC)
                 for item in items:
                     name_tag = item.select_one("a.name")
                     if not name_tag:

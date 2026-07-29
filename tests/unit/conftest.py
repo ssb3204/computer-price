@@ -5,9 +5,29 @@ stg_watchlist 를 (query, pcode, category, brand) 4튜플로 동일하게 조회
 그래서 워치리스트 mock 커넥션을 하나로 공유할 수 있다.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
+
+
+class FakeClock:
+    """호출할 때마다 1초씩 증가하는 가짜 시계.
+
+    크롤러가 datetime.now() 를 대상·페이지마다 부르면 한 회차 안에서 수집 시각이
+    갈리는데, 실제 시계로는 마이크로초 차이라 테스트가 불안정하다. 호출마다 눈에
+    띄게 다른 값을 돌려주어 "한 회차 = 한 시각"을 결정적으로 검증한다.
+
+    사용 예:
+        with patch("src.crawlers.danawa.datetime", FakeClock()):
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def now(self, tz: object = None) -> datetime:
+        self.calls += 1
+        return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=self.calls)
 
 
 @pytest.fixture
