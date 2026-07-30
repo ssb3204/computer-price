@@ -55,6 +55,8 @@ class TestCrawlersUseSharedTimeout:
     def test_pc_estimate_search(self, make_watch_conn):
         crawler = PCEstimateCrawler(conn=make_watch_conn([]))
         crawler._session = MagicMock()
+        # 검색 전에 토큰 요청이 먼저 나가므로 파싱 가능한 응답이 필요하다.
+        crawler._session.post.return_value.text = '<input id="search_query" value="TOK">'
 
         crawler._fetch_search_html("7800X3D", "1")
 

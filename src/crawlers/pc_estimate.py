@@ -1,7 +1,16 @@
 """Crawler for kjwwang.com (견적왕) — WATCHLIST 기반 크롤링.
 
 크롤링 대상은 stg_watchlist 테이블에서 동적으로 로드.
-카테고리(cate2) + 검색어로 POST 검색 후 pd_no로 정확한 상품을 찾아 가격 수집.
+검색어로 토큰을 받아 검색한 뒤 pd_no로 정확한 상품을 찾아 가격 수집한다
+(다나와·컴퓨존과 동일한 단일 경로 구조).
+
+요청 계약은 실측으로 확정했다 — 12개 필드를 하나씩 빼보고 확인:
+  search_query : 필수. 없으면 0건.
+  search_cate  : 필수. 없으면 다른 카테고리 상품에 밀려 대상이 페이지 밖으로 나간다
+                 (삼성 RAM 40개 중 38개가 5페이지 안에서 사라졌다).
+  page         : 필수. 없으면 1페이지 고정.
+나머지(sort/action/search_word/search1/sprice/eprice/list_sort_type/
+view_type/timeid)는 서버가 읽지 않는다.
 """
 
 import logging
@@ -46,6 +55,11 @@ def _euc_kr_body(fields: dict[str, str]) -> str:
     return urlencode(fields, encoding="euc-kr")
 
 
+def _search_form(token: str, cate: str, page: int) -> dict[str, str]:
+    """검색 요청 폼. 모듈 docstring 의 실측 결과대로 3개 필드만 보낸다."""
+    return {"search_query": token, "search_cate": cate, "page": str(page)}
+
+
 @dataclass(frozen=True)
 class SearchResult:
     """견적왕 검색 결과 단일 항목."""
@@ -87,11 +101,7 @@ def _get_search_token(session: requests.Session, query: str) -> str | None:
 def search_products(query: str, category: str, max_results: int = 10) -> list[SearchResult]:
     """카테고리 + 검색어로 견적왕을 검색해 매칭되는 상품 목록을 반환한다.
 
-    kjwwang.com의 진짜 키워드 검색(action=pc_estimate_keyword + search_cate)을 쓴다.
-    카테고리(cate1/cate2)만으로 목록을 가져와 이름을 클라이언트에서 문자열로 걸러내던
-    이전 방식은, 카테고리 전체가 40페이지 넘게 있고 매칭 상품은 페이지 곳곳에 드문드문
-    있어 앞쪽 몇 페이지만 봐서는 실제 검색 결과 대비 턱없이 적게 나오는 문제가 있었다.
-    search_cate 코드는 CATEGORY_TO_CATE2 와 동일하다(실측 확인).
+    정기 크롤링(crawl_raw)과 같은 검색 경로를 쓴다 — 모듈 docstring 참고.
 
     Args:
         query: 검색어 (예: "RTX 5080", "라이젠 7800X3D")
@@ -114,23 +124,9 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
     results: list[SearchResult] = []
 
     for page in range(1, MAX_SEARCH_PAGES + 1):
-        form_data = {
-            "sort": "",
-            "action": "pc_estimate_keyword",
-            "search_word": query,
-            "search1": "",
-            "search_query": token,
-            "search_cate": cate,
-            "sprice": "",
-            "eprice": "",
-            "page": str(page),
-            "list_sort_type": "",
-            "view_type": "list",
-            "timeid": "0",
-        }
         try:
             resp = session.post(
-                LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT, headers={"Referer": SEARCH_TOKEN_URL}
+                LIST_URL, data=_search_form(token, cate, page), timeout=REQUEST_TIMEOUT
             )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
@@ -171,20 +167,27 @@ def search_products(query: str, category: str, max_results: int = 10) -> list[Se
 def crawl_single(
     query: str, pd_no: str, category: str, brand: str | None = None
 ) -> RawCrawledPrice | None:
-    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용."""
+    """단일 상품 즉시 크롤링 — WATCHLIST 추가 직후 호출용.
+
+    정기 크롤링(crawl_raw)과 같은 검색 경로를 쓴다. 둘이 다르면 "등록할 땐
+    찾았는데 스케줄링에선 못 찾는" 불일치가 생긴다.
+    """
     cate2 = CATEGORY_TO_CATE2.get(category.upper())
     if cate2 is None:
         logger.warning("지원하지 않는 카테고리: %s", category)
         return None
 
     session = requests.Session()
+    token = _get_search_token(session, query)
+    if token is None:
+        logger.warning("kjwwang crawl_single: 검색 토큰 획득 실패 (query=%s)", query)
+        return None
+
     for page in range(1, MAX_SEARCH_PAGES + 1):
-        form_data = {
-            "depth": "2", "cate1": "2", "cate2": cate2,
-            "search_word": query, "page": str(page), "view_type": "list",
-        }
         try:
-            resp = session.post(LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT)
+            resp = session.post(
+                LIST_URL, data=_search_form(token, cate2, page), timeout=REQUEST_TIMEOUT
+            )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
         except requests.RequestException as e:
@@ -222,6 +225,9 @@ class PCEstimateCrawler(BaseCrawler):
     def __init__(self, conn: Connection) -> None:
         super().__init__()
         self._conn = conn
+        # 토큰은 검색어에 묶여 있으므로 페이지마다 다시 받을 필요가 없다.
+        # 같은 검색어를 쓰는 대상끼리도 재사용한다.
+        self._token_cache: dict[str, str] = {}
 
     @property
     def site_name(self) -> str:
@@ -242,16 +248,26 @@ class PCEstimateCrawler(BaseCrawler):
         finally:
             cur.close()
 
+    def _token_for(self, query: str) -> str | None:
+        """검색어별 토큰. 회차 안에서 한 번만 받는다."""
+        if query not in self._token_cache:
+            token = _get_search_token(self._session, query)
+            if token is None:
+                return None
+            self._token_cache[query] = token
+        return self._token_cache[query]
+
     def _fetch_search_html(self, query: str, cate2: str, page: int = 1) -> str | None:
+        token = self._token_for(query)
+        if token is None:
+            logger.warning("[%s] 검색 토큰 획득 실패: %s", self.site_name, query)
+            return None
+
         self._rate_limit()
-        form_data = {
-            "depth": "2", "cate1": "2", "cate2": cate2,
-            "search_word": query,
-            "page": str(page),
-            "view_type": "list",
-        }
         try:
-            resp = self._session.post(LIST_URL, data=form_data, timeout=REQUEST_TIMEOUT)
+            resp = self._session.post(
+                LIST_URL, data=_search_form(token, cate2, page), timeout=REQUEST_TIMEOUT
+            )
             resp.raise_for_status()
             resp.encoding = "euc-kr"
             return resp.text

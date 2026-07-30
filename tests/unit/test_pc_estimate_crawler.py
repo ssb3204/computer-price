@@ -11,6 +11,7 @@ from src.crawlers.pc_estimate import (
     MAX_SEARCH_PAGES,
     PCEstimateCrawler,
     _get_search_token,
+    crawl_single,
 )
 from tests.unit.conftest import FakeClock
 
@@ -303,3 +304,97 @@ class TestSearchTokenRequest:
         session.post.return_value = _response(_token_html("TOK"))
 
         assert _get_search_token(session, "RTX 5080") == "TOK"
+
+
+# ── 검색 요청 계약 ───────────────────────────────────────────────────────────
+
+
+class TestSearchRequestForm:
+    """정기 크롤링은 등록 화면과 같은 토큰 검색 경로를 써야 한다."""
+
+    def _crawler(self, make_watch_conn) -> PCEstimateCrawler:
+        crawler = PCEstimateCrawler(conn=make_watch_conn([]))
+        crawler._session = MagicMock()
+        crawler._session.post.return_value = _response(EMPTY_PAGE)
+        return crawler
+
+    def test_sends_token_search_form_not_category_listing(self, make_watch_conn):
+        """search_query/search_cate/page 3개만 보낸다.
+
+        depth/cate1/cate2 방식은 서버가 search_word 를 무시해 카테고리 목록을
+        그대로 내려준다 — 검색이 아니다.
+        """
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK"),
+            patch.object(crawler, "_rate_limit"),
+        ):
+            crawler._fetch_search_html("라이젠 7800X3D", "9", 2)
+
+        assert crawler._session.post.call_args.kwargs["data"] == {
+            "search_query": "TOK",
+            "search_cate": "9",
+            "page": "2",
+        }
+
+    def test_token_is_fetched_once_across_pages(self, make_watch_conn):
+        """토큰은 검색어에 묶여 있으므로 페이지마다 다시 받을 필요가 없다."""
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK") as mock_token,
+            patch.object(crawler, "_rate_limit"),
+        ):
+            for page in range(1, MAX_SEARCH_PAGES + 1):
+                crawler._fetch_search_html("라이젠 7800X3D", "9", page)
+
+        assert mock_token.call_count == 1
+        assert crawler._session.post.call_count == MAX_SEARCH_PAGES
+
+    def test_different_queries_get_different_tokens(self, make_watch_conn):
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK") as mock_token,
+            patch.object(crawler, "_rate_limit"),
+        ):
+            crawler._fetch_search_html("라이젠 7800X3D", "9", 1)
+            crawler._fetch_search_html("RTX 5080", "12", 1)
+
+        assert mock_token.call_count == 2
+
+    def test_token_failure_skips_request(self, make_watch_conn):
+        """토큰 없이 검색하면 서버가 0건을 주므로 요청 자체를 하지 않는다."""
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value=None),
+            patch.object(crawler, "_rate_limit"),
+        ):
+            assert crawler._fetch_search_html("라이젠 7800X3D", "9", 1) is None
+
+        crawler._session.post.assert_not_called()
+
+
+class TestCrawlSingleUsesSamePath:
+    """등록 직후 크롤링과 정기 크롤링이 다르면 '등록은 됐는데 갱신은 안 되는' 상품이 생긴다."""
+
+    def test_sends_token_search_form(self):
+        with (
+            patch("src.crawlers.pc_estimate.requests.Session") as session_cls,
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK"),
+        ):
+            session = session_cls.return_value
+            session.post.return_value = _response(
+                _page(_item("1001", name="AMD 라이젠 7 7800X3D", price="450,000원"))
+            )
+            result = crawl_single("라이젠 7800X3D", "1001", "CPU", "AMD")
+
+        assert session.post.call_args.kwargs["data"] == {
+            "search_query": "TOK",
+            "search_cate": CATEGORY_TO_CATE2["CPU"],
+            "page": "1",
+        }
+        assert result is not None
+        assert result.product_name == "AMD 라이젠 7 7800X3D"
