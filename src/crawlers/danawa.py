@@ -5,7 +5,6 @@
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -93,55 +92,6 @@ class SearchResult:
     pcode: str
     product_name: str
     url: str
-
-
-def _fetch_product_title(pcode: str) -> str | None:
-    """상세 페이지 <title>에서 용량 포함 전체 상품명을 추출한다.
-
-    <title> 태그가 나올 때까지만 읽어 네트워크 비용을 줄인다.
-    """
-    try:
-        resp = requests.get(
-            f"{PRODUCT_BASE}{pcode}",
-            headers=DEFAULT_HEADERS,
-            timeout=REQUEST_TIMEOUT,
-            stream=True,
-        )
-        resp.raise_for_status()
-        buf = b""
-        for chunk in resp.iter_content(chunk_size=4096):
-            buf += chunk
-            if b"</title>" in buf:
-                resp.close()
-                break
-        text = buf.decode("utf-8", errors="ignore")
-    except requests.RequestException:
-        return None
-
-    m = re.search(r"<title>(.+?)</title>", text, re.DOTALL)
-    if not m:
-        return None
-    name = m.group(1).strip()
-    return re.sub(r"\s*:\s*다나와.*$", "", name).strip()
-
-
-def enrich_names_from_detail(results: list[SearchResult]) -> list[SearchResult]:
-    """검색 결과 상품명을 상세 페이지 title로 교체해 용량 정보를 포함시킨다.
-
-    병렬 fetch로 지연을 최소화한다.
-    """
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        pcode_to_future = {r.pcode: executor.submit(_fetch_product_title, r.pcode) for r in results}
-        enriched: dict[str, str] = {}
-        for pcode, future in pcode_to_future.items():
-            title = future.result()
-            if title:
-                enriched[pcode] = title
-
-    return [
-        SearchResult(pcode=r.pcode, product_name=enriched.get(r.pcode, r.product_name), url=r.url)
-        for r in results
-    ]
 
 
 MAX_SEARCH_PAGES = 5
