@@ -90,13 +90,13 @@ class TestHelperExtraction:
             item = _first_item(_product_li("111", ad_prefix=prefix))
             assert _is_real_product(item) is False, f"{prefix} 가 실제 상품으로 통과했다"
 
-    def test_extract_url_keeps_allowed_domain(self):
+    def test_extract_url_returns_absolute_link(self):
         item = _first_item(_product_li("111"))
-        assert _extract_url(item).startswith("https://prod.danawa.com/")
+        assert _extract_url(item) == _DEFAULT_HREF.format(pcode="111")
 
-    def test_extract_url_rejects_external_domain(self):
-        """허용 도메인 밖 링크는 빈 문자열로 버린다."""
-        item = _first_item(_product_li("111", href="https://evil.example.com/info?pcode=111"))
+    def test_extract_url_ignores_relative_link(self):
+        """상대경로는 빈 문자열 — 호출부가 PRODUCT_BASE + pcode 로 대체한다."""
+        item = _first_item(_product_li("111", href="/info/?pcode=111"))
         assert _extract_url(item) == ""
 
 
@@ -245,13 +245,11 @@ class TestCrawlRaw:
         assert len(results) == 2
         assert {r.category for r in results} == {"CPU", "GPU"}
 
-    def test_external_url_falls_back_to_product_base(self, make_watch_conn):
-        """링크가 허용 도메인 밖이면 pcode 기반 정규 URL로 대체한다."""
+    def test_relative_url_falls_back_to_product_base(self, make_watch_conn):
+        """링크가 절대 URL이 아니면 pcode 기반 정규 URL로 대체한다."""
         conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
         crawler = DanawaCrawler(conn=conn)
-        page = _search_page(
-            _product_li("19627934", href="https://evil.example.com/?pcode=19627934")
-        )
+        page = _search_page(_product_li("19627934", href="/info/?pcode=19627934"))
 
         with patch.object(crawler, "_fetch_with_retry", return_value=page):
             results = crawler.crawl_raw()
