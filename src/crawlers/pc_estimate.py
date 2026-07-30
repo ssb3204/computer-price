@@ -8,6 +8,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlencode
 
 import requests
 from bs4 import BeautifulSoup
@@ -30,6 +31,20 @@ CATEGORY_TO_CATE2: dict[str, str] = {
     "SSD": "243",
 }
 
+# 폼을 미리 인코딩한 문자열로 넘기면 requests 가 Content-Type 을 붙여주지 않는다.
+_FORM_HEADERS = {"Content-Type": "application/x-www-form-urlencoded"}
+
+
+def _euc_kr_body(fields: dict[str, str]) -> str:
+    """폼 데이터를 EUC-KR로 인코딩한다.
+
+    견적왕은 charset=euc-kr 사이트다. requests 에 dict 를 넘기면 UTF-8 로 나가는데,
+    서버는 그 바이트를 EUC-KR로 해석하므로 한글 검색어가 깨져 조용히 0건이 된다
+    (영문·숫자는 두 인코딩이 동일해서 우연히 통과한다). 브라우저는 문서 charset 을
+    보고 알아서 EUC-KR로 보내기 때문에 사람이 손으로 확인하면 늘 정상으로 보인다.
+    """
+    return urlencode(fields, encoding="euc-kr")
+
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -45,16 +60,21 @@ def _extract_pd_no(href: str) -> str | None:
 
 
 def _get_search_token(session: requests.Session, query: str) -> str | None:
-    """product_search.html 최초 요청에서 세션 종속 검색 토큰(search_query)을 얻는다.
+    """product_search.html 요청에서 검색어 토큰(search_query)을 얻는다.
 
-    실측 확인: 이 토큰 없이 action=pc_estimate_keyword 를 호출하면 검색어/카테고리가
-    맞아도 결과가 항상 0건이다. 사이트 검색창(main_search)이 실제로 쓰는 흐름을
-    그대로 재현한다 — 이 페이지는 카테고리별 매칭 개수를 보여주는 탭도 함께 내려주는데,
-    그 탭에 적힌 개수(예: "그래픽카드 (28)")가 실제 사이트 검색 결과와 정확히 일치함을
-    확인했다(요청받은 버그 리포트의 "9070 검색 시 29개" — 전체탭 기준 개수).
+    이 토큰이 검색어를 실어 나른다 — 평문 search_word 는 서버가 읽지 않는다.
+
+    토큰은 세션이 아니라 검색어에 묶여 있다(실측): 쿠키 없는 새 세션에서도 같은
+    토큰이 그대로 동작하고, 검색어가 다르면 토큰도 다르다. 따라서 세션을 유지할
+    필요는 없지만 검색어마다 새로 받아야 한다.
     """
     try:
-        resp = session.post(SEARCH_TOKEN_URL, data={"main_search": query}, timeout=REQUEST_TIMEOUT)
+        resp = session.post(
+            SEARCH_TOKEN_URL,
+            data=_euc_kr_body({"main_search": query}),
+            headers=_FORM_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
         resp.raise_for_status()
         resp.encoding = "euc-kr"
     except requests.RequestException as e:

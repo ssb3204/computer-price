@@ -4,9 +4,14 @@
   검색(POST) → li.list 파싱 → href 의 pd_no 정확매칭
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from src.crawlers.pc_estimate import CATEGORY_TO_CATE2, MAX_SEARCH_PAGES, PCEstimateCrawler
+from src.crawlers.pc_estimate import (
+    CATEGORY_TO_CATE2,
+    MAX_SEARCH_PAGES,
+    PCEstimateCrawler,
+    _get_search_token,
+)
 from tests.unit.conftest import FakeClock
 
 # ── HTML fixture 빌더 ────────────────────────────────────────────────────────
@@ -253,3 +258,48 @@ class TestMalformedItems:
 
         assert len(results) == 1
         assert results[0].url == ""
+
+
+# ── 요청 인코딩 ──────────────────────────────────────────────────────────────
+
+
+def _response(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.text = text
+    return resp
+
+
+def _token_html(token: str) -> str:
+    return f'<input type="hidden" id="search_query" value="{token}">'
+
+
+class TestSearchTokenRequest:
+    """견적왕은 EUC-KR 사이트다 — 요청 인코딩이 틀리면 한글 검색어가 0건이 된다."""
+
+    def test_korean_query_is_euc_kr_encoded(self):
+        """'라이젠' = EUC-KR 6바이트(B6 F3 C0 CC C1 A8).
+
+        UTF-8 로 보내면 %EB%9D%BC%EC%9D%B4%EC%A0%A0 이 되고 서버가 못 읽는다.
+        """
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        _get_search_token(session, "라이젠")
+
+        assert session.post.call_args.kwargs["data"] == "main_search=%B6%F3%C0%CC%C1%A8"
+
+    def test_form_content_type_is_declared(self):
+        """폼을 미리 인코딩한 문자열로 넘기면 requests 가 Content-Type 을 안 붙인다."""
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        _get_search_token(session, "라이젠")
+
+        headers = session.post.call_args.kwargs["headers"]
+        assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+    def test_ascii_query_still_works(self):
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        assert _get_search_token(session, "RTX 5080") == "TOK"
