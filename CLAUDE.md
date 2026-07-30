@@ -62,10 +62,31 @@ run_pipeline.py      # 파이프라인 전체 실행 진입점
 - 컴퓨존 크롤러: 3사 공통으로 단일 경로다 — search_list.php GET(EUC-KR, li.li-obj 파싱)에서
   검색어+MediumDivNo로 조회 후 ProductNo 정확매칭. fallback 없음.
   브라우저에 보이는 div.prdbx는 AJAX 렌더링 후 DOM이라 직접 크롤링 불가 — 셀렉터 변경 금지.
-  확인은 개발자도구 Elements가 아니라 Network 탭의 Response로 한다.
   (구 3단계 fallback은 2026-07-29 제거: ①카테고리목록은 검색어를 안 써 추천순 100위 밖이면
    실패했고 검색 경로가 그 상위집합임을 실측 확인, ③상세페이지는 <title> 기반이라 상품명에
    용량·옵션이 덧붙어 같은 상품이 stg_products에서 둘로 갈라졌다)
+- 견적왕 크롤러: 요청이 2단계다 (2026-07-30 확정).
+  ① POST product_search.html (main_search=검색어) → 응답 HTML의 id="search_query" value가 토큰
+  ② POST product_list_include_plist.php — search_query/search_cate/page 3개만 보낸다
+  12개 필드를 하나씩 빼보며 실측한 결과, 이 3개 외 9개(action/search_word/view_type/timeid 등)는
+  서버가 읽지 않는다. Referer 헤더와 세션 쿠키도 불필요하다.
+  search_query가 없으면 0건, page가 없으면 1페이지 고정, search_cate가 없으면 다른 카테고리
+  상품에 밀려 대상이 페이지 밖으로 나간다(삼성 RAM 40개 중 38개가 5페이지 밖으로 사라졌다).
+  토큰은 세션이 아니라 검색어에 묶여 있다 — 검색어마다 새로 받고, 같은 검색어면
+  페이지·대상 간에 재사용한다(_token_cache).
+  구 depth/cate1/cate2 방식은 검색이 아니다. 서버가 search_word를 무시해 카테고리 목록을
+  그대로 내려주므로, 없는 검색어를 넣어도 결과가 같다. 되돌리지 말 것.
+- 요청 인코딩: 견적왕은 charset=euc-kr 사이트라 폼도 EUC-KR로 보내야 한다
+  (pc_estimate.py의 _euc_kr_body). requests에 dict를 넘기면 UTF-8로 나가고 서버가 그 바이트를
+  EUC-KR로 읽어 한글 검색어가 조용히 0건이 된다. 영문·숫자는 두 인코딩의 바이트가 같아
+  우연히 통과하므로 "RTX 5080은 되는데 라이젠 7800X3D는 0건"인 형태로 나타난다 — 에러가
+  안 나서 발견이 늦다. 다나와·컴퓨존 서버는 UTF-8 요청을 받아준다(컴퓨존은 응답만 EUC-KR).
+- 브라우저에서 잘 되는 것은 크롤러가 된다는 근거가 아니다. 브라우저는 ①문서 charset을 보고
+  폼을 대신 인코딩해주고 ②JS 렌더링 후 DOM을 보여준다. 둘 다 크롤러가 받는 것과 다르다.
+  확인은 코드로 재현하거나 개발자도구 Network 탭의 Response로 한다 — Elements 탭이 아니다.
+- fallback이 없으므로 검색 실패가 곧 그 상품의 수집 실패다. 3사 crawl_raw 모두 대상 미발견 시
+  query와 사이트 고유 ID를 warning으로 남긴다. 총계 로그만으로는 워치리스트가 커졌을 때
+  부분 실패를 알 수 없다.
 - 크롤링 대상은 3사 모두 stg_watchlist에서 로드하고, 사이트 고유 ID(pcode/ProductNo/pd_no)로
   정확매칭한다. 이름 유사도 매칭이 아니다.
 - crawled_at은 crawl_raw() 진입 시 한 번만 정해 그 회차 전체에 쓴다. 대상·페이지 루프 안에서
