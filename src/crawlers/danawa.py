@@ -206,6 +206,32 @@ class DanawaCrawler(BaseCrawler):
         finally:
             cur.close()
 
+    def _find_target_price(
+        self, html: str, target: dict, crawled_at: datetime
+    ) -> RawCrawledPrice | None:
+        """검색 결과에서 pcode 가 일치하는 상품을 찾는다.
+
+        crawled_at 은 회차 시각을 그대로 받는다 — 여기서 now() 를 다시 부르면
+        같은 회차인데 상품마다 수집 시각이 달라진다.
+        """
+        for item in BeautifulSoup(html, "html.parser").select("li.prod_item"):
+            if not _is_real_product(item):
+                continue
+            if _extract_pcode(item) != target["pcode"]:
+                continue
+            name = _extract_name(item)
+            price_text = _extract_price_text(item)
+            if name is None or price_text is None:
+                return None
+            return RawCrawledPrice(
+                site=self.site_name, category=target["category"],
+                product_name=name, price_text=price_text,
+                brand=target["brand"],
+                url=_extract_url(item) or f"{PRODUCT_BASE}{target['pcode']}",
+                crawled_at=crawled_at,
+            )
+        return None
+
     def crawl_raw(self) -> list[RawCrawledPrice]:
         """Raw 데이터 수집 — WATCHLIST 기반."""
         targets = self._load_watch_products()
@@ -218,28 +244,16 @@ class DanawaCrawler(BaseCrawler):
         for target in targets:
             url = f"{SEARCH_URL}?query={target['query']}&tab=goods"
             html = self._fetch_with_retry(url)
-            if html is None:
+            raw = self._find_target_price(html, target, now) if html is not None else None
+            if raw is None:
+                # fallback 이 없으므로 검색 실패가 곧 그 상품의 수집 실패다.
+                # 조용히 넘기면 워치리스트가 커졌을 때 부분 실패를 알 수 없다.
+                logger.warning(
+                    "[%s] 대상 미발견: %s (pcode=%s)",
+                    self.site_name, target["query"], target["pcode"],
+                )
                 continue
-            soup = BeautifulSoup(html, "html.parser")
-
-            for item in soup.select("li.prod_item"):
-                if not _is_real_product(item):
-                    continue
-                pcode = _extract_pcode(item)
-                if pcode != target["pcode"]:
-                    continue
-                name = _extract_name(item)
-                price_text = _extract_price_text(item)
-                if name is None or price_text is None:
-                    break
-                product_url = _extract_url(item) or f"{PRODUCT_BASE}{target['pcode']}"
-                all_raw.append(RawCrawledPrice(
-                    site="danawa", category=target["category"],
-                    product_name=name, price_text=price_text,
-                    brand=target["brand"], url=product_url,
-                    crawled_at=now,
-                ))
-                break
+            all_raw.append(raw)
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw

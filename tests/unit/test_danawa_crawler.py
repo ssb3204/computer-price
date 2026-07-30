@@ -4,6 +4,7 @@ tmp/ 에 저장해둔 HTML 파일에 의존하면 tmp/ 가 .gitignore 대상이�
 CI 러너에서 전 테스트가 skip 된다. 그래서 fixture 를 전부 inline 으로 둔다.
 """
 
+import logging
 from unittest.mock import patch
 
 from bs4 import BeautifulSoup
@@ -278,3 +279,63 @@ class TestCrawlRaw:
         called_url = mock_fetch.call_args[0][0]
         assert "라이젠 7800X3D" in called_url
         assert "tab=goods" in called_url
+
+
+# ── 부분 실패 관찰성 ─────────────────────────────────────────────────────────
+
+
+class TestMissingTargetIsReported:
+    """총계 로그만으로는 어떤 상품이 빠졌는지 알 수 없다 — 컴퓨존·견적왕과 형식을 맞춘다."""
+
+    def _warnings(self, crawler, caplog, fetch_result) -> str:
+        with (
+            patch.object(crawler, "_fetch_with_retry", return_value=fetch_result),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.danawa"),
+        ):
+            results = crawler.crawl_raw()
+        return results, " ".join(r.getMessage() for r in caplog.records)
+
+    def test_warns_with_query_and_pcode(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("99999999"))
+        )
+
+        assert results == []
+        assert "19627934" in warned
+        assert "라이젠 7800X3D" in warned
+
+    def test_warns_when_fetch_failed(self, make_watch_conn, caplog):
+        """요청 자체가 실패한 대상도 수집이 빠진 건 마찬가지다."""
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(crawler, caplog, None)
+
+        assert results == []
+        assert "19627934" in warned
+
+    def test_warns_when_price_missing(self, make_watch_conn, caplog):
+        """pcode 는 맞았지만 가격을 못 뽑은 경우도 미수집이다."""
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("19627934", with_price=False))
+        )
+
+        assert results == []
+        assert "19627934" in warned
+
+    def test_no_warning_when_found(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("19627934"))
+        )
+
+        assert len(results) == 1
+        assert "미발견" not in warned
