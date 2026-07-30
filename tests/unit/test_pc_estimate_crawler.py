@@ -4,6 +4,7 @@
   검색(POST) → li.list 파싱 → href 의 pd_no 정확매칭
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 from src.crawlers.pc_estimate import (
@@ -375,6 +376,40 @@ class TestSearchRequestForm:
             assert crawler._fetch_search_html("라이젠 7800X3D", "9", 1) is None
 
         crawler._session.post.assert_not_called()
+
+
+class TestMissingTargetIsReported:
+    def test_warns_with_query_and_pd_no(self, make_watch_conn, caplog):
+        """fallback 이 없으므로 검색 실패가 곧 그 상품의 수집 실패다.
+
+        조용히 넘기면 워치리스트가 커졌을 때 부분 실패를 알 수 없다.
+        """
+        conn = make_watch_conn([("라이젠 7800X3D", "1001", "CPU", "AMD")])
+        crawler = PCEstimateCrawler(conn=conn)
+
+        with (
+            patch.object(crawler, "_fetch_search_html", return_value=_page(_item("9999"))),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.pc_estimate"),
+        ):
+            results = crawler.crawl_raw()
+
+        assert results == []
+        warned = " ".join(r.getMessage() for r in caplog.records)
+        assert "1001" in warned
+        assert "라이젠 7800X3D" in warned
+
+    def test_no_warning_when_found(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "1001", "CPU", "AMD")])
+        crawler = PCEstimateCrawler(conn=conn)
+
+        with (
+            patch.object(crawler, "_fetch_search_html", return_value=_page(_item("1001"))),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.pc_estimate"),
+        ):
+            results = crawler.crawl_raw()
+
+        assert len(results) == 1
+        assert "미발견" not in " ".join(r.getMessage() for r in caplog.records)
 
 
 class TestCrawlSingleUsesSamePath:

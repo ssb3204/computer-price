@@ -76,7 +76,8 @@ def _extract_pd_no(href: str) -> str | None:
 def _get_search_token(session: requests.Session, query: str) -> str | None:
     """product_search.html 요청에서 검색어 토큰(search_query)을 얻는다.
 
-    이 토큰이 검색어를 실어 나른다 — 평문 search_word 는 서버가 읽지 않는다.
+    이 토큰이 검색어를 실어 나른다. 평문 search_word 는 서버가 읽지 않는다 —
+    토큰(RTX 5080) + search_word=7800X3D 로 보내면 0건이 나온다.
 
     토큰은 세션이 아니라 검색어에 묶여 있다(실측): 쿠키 없는 새 세션에서도 같은
     토큰이 그대로 동작하고, 검색어가 다르면 토큰도 다르다. 따라서 세션을 유지할
@@ -328,6 +329,14 @@ class PCEstimateCrawler(BaseCrawler):
 
                 if found:
                     break
+
+            if not found:
+                # fallback 이 없으므로 검색 실패가 곧 그 상품의 수집 실패다.
+                # 조용히 넘기면 워치리스트가 커졌을 때 부분 실패를 알 수 없다.
+                logger.warning(
+                    "[%s] 대상 미발견: %s (pd_no=%s)",
+                    self.site_name, target["query"], target["pd_no"],
+                )
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw
