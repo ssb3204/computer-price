@@ -4,9 +4,16 @@
   검색(POST) → li.list 파싱 → href 의 pd_no 정확매칭
 """
 
-from unittest.mock import patch
+import logging
+from unittest.mock import MagicMock, patch
 
-from src.crawlers.pc_estimate import CATEGORY_TO_CATE2, MAX_SEARCH_PAGES, PCEstimateCrawler
+from src.crawlers.pc_estimate import (
+    CATEGORY_TO_CATE2,
+    MAX_SEARCH_PAGES,
+    PCEstimateCrawler,
+    _get_search_token,
+    crawl_single,
+)
 from tests.unit.conftest import FakeClock
 
 # ── HTML fixture 빌더 ────────────────────────────────────────────────────────
@@ -253,3 +260,176 @@ class TestMalformedItems:
 
         assert len(results) == 1
         assert results[0].url == ""
+
+
+# ── 요청 인코딩 ──────────────────────────────────────────────────────────────
+
+
+def _response(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.text = text
+    return resp
+
+
+def _token_html(token: str) -> str:
+    return f'<input type="hidden" id="search_query" value="{token}">'
+
+
+class TestSearchTokenRequest:
+    """견적왕은 EUC-KR 사이트다 — 요청 인코딩이 틀리면 한글 검색어가 0건이 된다."""
+
+    def test_korean_query_is_euc_kr_encoded(self):
+        """'라이젠' = EUC-KR 6바이트(B6 F3 C0 CC C1 A8).
+
+        UTF-8 로 보내면 %EB%9D%BC%EC%9D%B4%EC%A0%A0 이 되고 서버가 못 읽는다.
+        """
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        _get_search_token(session, "라이젠")
+
+        assert session.post.call_args.kwargs["data"] == "main_search=%B6%F3%C0%CC%C1%A8"
+
+    def test_form_content_type_is_declared(self):
+        """폼을 미리 인코딩한 문자열로 넘기면 requests 가 Content-Type 을 안 붙인다."""
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        _get_search_token(session, "라이젠")
+
+        headers = session.post.call_args.kwargs["headers"]
+        assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+    def test_ascii_query_still_works(self):
+        session = MagicMock()
+        session.post.return_value = _response(_token_html("TOK"))
+
+        assert _get_search_token(session, "RTX 5080") == "TOK"
+
+
+# ── 검색 요청 계약 ───────────────────────────────────────────────────────────
+
+
+class TestSearchRequestForm:
+    """정기 크롤링은 등록 화면과 같은 토큰 검색 경로를 써야 한다."""
+
+    def _crawler(self, make_watch_conn) -> PCEstimateCrawler:
+        crawler = PCEstimateCrawler(conn=make_watch_conn([]))
+        crawler._session = MagicMock()
+        crawler._session.post.return_value = _response(EMPTY_PAGE)
+        return crawler
+
+    def test_sends_token_search_form_not_category_listing(self, make_watch_conn):
+        """search_query/search_cate/page 3개만 보낸다.
+
+        depth/cate1/cate2 방식은 서버가 search_word 를 무시해 카테고리 목록을
+        그대로 내려준다 — 검색이 아니다.
+        """
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK"),
+            patch.object(crawler, "_rate_limit"),
+        ):
+            crawler._fetch_search_html("라이젠 7800X3D", "9", 2)
+
+        assert crawler._session.post.call_args.kwargs["data"] == {
+            "search_query": "TOK",
+            "search_cate": "9",
+            "page": "2",
+        }
+
+    def test_token_is_fetched_once_across_pages(self, make_watch_conn):
+        """토큰은 검색어에 묶여 있으므로 페이지마다 다시 받을 필요가 없다."""
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK") as mock_token,
+            patch.object(crawler, "_rate_limit"),
+        ):
+            for page in range(1, MAX_SEARCH_PAGES + 1):
+                crawler._fetch_search_html("라이젠 7800X3D", "9", page)
+
+        assert mock_token.call_count == 1
+        assert crawler._session.post.call_count == MAX_SEARCH_PAGES
+
+    def test_different_queries_get_different_tokens(self, make_watch_conn):
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK") as mock_token,
+            patch.object(crawler, "_rate_limit"),
+        ):
+            crawler._fetch_search_html("라이젠 7800X3D", "9", 1)
+            crawler._fetch_search_html("RTX 5080", "12", 1)
+
+        assert mock_token.call_count == 2
+
+    def test_token_failure_skips_request(self, make_watch_conn):
+        """토큰 없이 검색하면 서버가 0건을 주므로 요청 자체를 하지 않는다."""
+        crawler = self._crawler(make_watch_conn)
+
+        with (
+            patch("src.crawlers.pc_estimate._get_search_token", return_value=None),
+            patch.object(crawler, "_rate_limit"),
+        ):
+            assert crawler._fetch_search_html("라이젠 7800X3D", "9", 1) is None
+
+        crawler._session.post.assert_not_called()
+
+
+class TestMissingTargetIsReported:
+    def test_warns_with_query_and_pd_no(self, make_watch_conn, caplog):
+        """fallback 이 없으므로 검색 실패가 곧 그 상품의 수집 실패다.
+
+        조용히 넘기면 워치리스트가 커졌을 때 부분 실패를 알 수 없다.
+        """
+        conn = make_watch_conn([("라이젠 7800X3D", "1001", "CPU", "AMD")])
+        crawler = PCEstimateCrawler(conn=conn)
+
+        with (
+            patch.object(crawler, "_fetch_search_html", return_value=_page(_item("9999"))),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.pc_estimate"),
+        ):
+            results = crawler.crawl_raw()
+
+        assert results == []
+        warned = " ".join(r.getMessage() for r in caplog.records)
+        assert "1001" in warned
+        assert "라이젠 7800X3D" in warned
+
+    def test_no_warning_when_found(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "1001", "CPU", "AMD")])
+        crawler = PCEstimateCrawler(conn=conn)
+
+        with (
+            patch.object(crawler, "_fetch_search_html", return_value=_page(_item("1001"))),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.pc_estimate"),
+        ):
+            results = crawler.crawl_raw()
+
+        assert len(results) == 1
+        assert "미발견" not in " ".join(r.getMessage() for r in caplog.records)
+
+
+class TestCrawlSingleUsesSamePath:
+    """등록 직후 크롤링과 정기 크롤링이 다르면 '등록은 됐는데 갱신은 안 되는' 상품이 생긴다."""
+
+    def test_sends_token_search_form(self):
+        with (
+            patch("src.crawlers.pc_estimate.requests.Session") as session_cls,
+            patch("src.crawlers.pc_estimate._get_search_token", return_value="TOK"),
+        ):
+            session = session_cls.return_value
+            session.post.return_value = _response(
+                _page(_item("1001", name="AMD 라이젠 7 7800X3D", price="450,000원"))
+            )
+            result = crawl_single("라이젠 7800X3D", "1001", "CPU", "AMD")
+
+        assert session.post.call_args.kwargs["data"] == {
+            "search_query": "TOK",
+            "search_cate": CATEGORY_TO_CATE2["CPU"],
+            "page": "1",
+        }
+        assert result is not None
+        assert result.product_name == "AMD 라이젠 7 7800X3D"

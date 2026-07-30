@@ -4,6 +4,7 @@ tmp/ 에 저장해둔 HTML 파일에 의존하면 tmp/ 가 .gitignore 대상이�
 CI 러너에서 전 테스트가 skip 된다. 그래서 fixture 를 전부 inline 으로 둔다.
 """
 
+import logging
 from unittest.mock import patch
 
 from bs4 import BeautifulSoup
@@ -63,14 +64,24 @@ class TestHelperExtraction:
         item = _first_item(_product_li("19627934"))
         assert _extract_pcode(item) == "19627934"
 
-    def test_pcode_from_href_when_id_not_product_item(self):
-        """id 가 productItem* 형식이 아니면 링크의 pcode= 로 폴백한다."""
+    def test_pcode_none_when_id_not_product_item(self):
+        """id 가 productItem* 형식이 아니면 pcode 를 뽑지 않는다.
+
+        id 를 숫자만으로 둔 건 의도적이다 — startswith 가드를 지우면
+        removeprefix 가 no-op 이라 이 값이 그대로 pcode 로 통과해버린다.
+        링크에 pcode= 가 있어도 거기서 뽑지 않는다(폴백 없음).
+        """
         html = (
-            '<li class="prod_item" id="somethingElse">'
+            '<li class="prod_item" id="12345678">'
             '  <div class="prod_name"><a href="/info/?pcode=12345678">이름</a></div>'
             "</li>"
         )
-        assert _extract_pcode(_first_item(html)) == "12345678"
+        assert _extract_pcode(_first_item(html)) is None
+
+    def test_pcode_none_when_id_suffix_not_numeric(self):
+        """productItem 뒤가 숫자가 아니면 pcode 가 아니다."""
+        html = '<li class="prod_item" id="productItemAbc"></li>'
+        assert _extract_pcode(_first_item(html)) is None
 
     def test_name_and_price_text(self):
         item = _first_item(_product_li("111", name="AMD 라이젠 7800X3D", price="450,000원"))
@@ -90,13 +101,13 @@ class TestHelperExtraction:
             item = _first_item(_product_li("111", ad_prefix=prefix))
             assert _is_real_product(item) is False, f"{prefix} 가 실제 상품으로 통과했다"
 
-    def test_extract_url_keeps_allowed_domain(self):
+    def test_extract_url_returns_absolute_link(self):
         item = _first_item(_product_li("111"))
-        assert _extract_url(item).startswith("https://prod.danawa.com/")
+        assert _extract_url(item) == _DEFAULT_HREF.format(pcode="111")
 
-    def test_extract_url_rejects_external_domain(self):
-        """허용 도메인 밖 링크는 빈 문자열로 버린다."""
-        item = _first_item(_product_li("111", href="https://evil.example.com/info?pcode=111"))
+    def test_extract_url_ignores_relative_link(self):
+        """상대경로는 빈 문자열 — 호출부가 PRODUCT_BASE + pcode 로 대체한다."""
+        item = _first_item(_product_li("111", href="/info/?pcode=111"))
         assert _extract_url(item) == ""
 
 
@@ -245,13 +256,11 @@ class TestCrawlRaw:
         assert len(results) == 2
         assert {r.category for r in results} == {"CPU", "GPU"}
 
-    def test_external_url_falls_back_to_product_base(self, make_watch_conn):
-        """링크가 허용 도메인 밖이면 pcode 기반 정규 URL로 대체한다."""
+    def test_relative_url_falls_back_to_product_base(self, make_watch_conn):
+        """링크가 절대 URL이 아니면 pcode 기반 정규 URL로 대체한다."""
         conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
         crawler = DanawaCrawler(conn=conn)
-        page = _search_page(
-            _product_li("19627934", href="https://evil.example.com/?pcode=19627934")
-        )
+        page = _search_page(_product_li("19627934", href="/info/?pcode=19627934"))
 
         with patch.object(crawler, "_fetch_with_retry", return_value=page):
             results = crawler.crawl_raw()
@@ -270,3 +279,63 @@ class TestCrawlRaw:
         called_url = mock_fetch.call_args[0][0]
         assert "라이젠 7800X3D" in called_url
         assert "tab=goods" in called_url
+
+
+# ── 부분 실패 관찰성 ─────────────────────────────────────────────────────────
+
+
+class TestMissingTargetIsReported:
+    """총계 로그만으로는 어떤 상품이 빠졌는지 알 수 없다 — 컴퓨존·견적왕과 형식을 맞춘다."""
+
+    def _warnings(self, crawler, caplog, fetch_result) -> str:
+        with (
+            patch.object(crawler, "_fetch_with_retry", return_value=fetch_result),
+            caplog.at_level(logging.WARNING, logger="src.crawlers.danawa"),
+        ):
+            results = crawler.crawl_raw()
+        return results, " ".join(r.getMessage() for r in caplog.records)
+
+    def test_warns_with_query_and_pcode(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("99999999"))
+        )
+
+        assert results == []
+        assert "19627934" in warned
+        assert "라이젠 7800X3D" in warned
+
+    def test_warns_when_fetch_failed(self, make_watch_conn, caplog):
+        """요청 자체가 실패한 대상도 수집이 빠진 건 마찬가지다."""
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(crawler, caplog, None)
+
+        assert results == []
+        assert "19627934" in warned
+
+    def test_warns_when_price_missing(self, make_watch_conn, caplog):
+        """pcode 는 맞았지만 가격을 못 뽑은 경우도 미수집이다."""
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("19627934", with_price=False))
+        )
+
+        assert results == []
+        assert "19627934" in warned
+
+    def test_no_warning_when_found(self, make_watch_conn, caplog):
+        conn = make_watch_conn([("라이젠 7800X3D", "19627934", "CPU", "AMD")])
+        crawler = DanawaCrawler(conn=conn)
+
+        results, warned = self._warnings(
+            crawler, caplog, _search_page(_product_li("19627934"))
+        )
+
+        assert len(results) == 1
+        assert "미발견" not in warned

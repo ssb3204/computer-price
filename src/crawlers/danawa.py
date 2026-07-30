@@ -5,10 +5,8 @@
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -21,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://search.danawa.com/dsearch.php"
 PRODUCT_BASE = "https://prod.danawa.com/info/?pcode="
-ALLOWED_DOMAINS = {"danawa.com", "prod.danawa.com", "search.danawa.com", "shop.danawa.com"}
 
 
 def _is_real_product(item: Tag) -> bool:
@@ -31,18 +28,16 @@ def _is_real_product(item: Tag) -> bool:
 
 
 def _extract_pcode(item: Tag) -> str | None:
-    """Extract numeric pcode from a li.prod_item element."""
-    item_id = item.get("id", "")
-    if isinstance(item_id, str) and item_id.startswith("productItem"):
-        code = item_id.removeprefix("productItem")
-        return code if code.isdigit() else None
+    """li.prod_item 의 id(productItem<숫자>)에서 pcode 를 뽑는다.
 
-    link = item.select_one(".prod_name a[href]")
-    if link:
-        match = re.search(r"pcode=(\d+)", link.get("href", ""))
-        if match:
-            return match.group(1)
-    return None
+    호출부는 모두 _is_real_product 로 id 형식을 먼저 거르므로 여기 오는 item 은
+    항상 productItem* 이다.
+    """
+    item_id = item.get("id", "")
+    if not isinstance(item_id, str) or not item_id.startswith("productItem"):
+        return None
+    code = item_id.removeprefix("productItem")
+    return code if code.isdigit() else None
 
 
 def _extract_name(item: Tag) -> str | None:
@@ -57,13 +52,12 @@ def _extract_price_text(item: Tag) -> str | None:
 
 
 def _extract_url(item: Tag) -> str:
+    """상품 링크. 절대 URL이 아니면 빈 문자열 — 호출부가 pcode로 URL을 만든다."""
     link = item.select_one(".prod_name a[href]")
     if link:
         href = link.get("href", "")
         if href.startswith("http"):
-            netloc = urlparse(href).netloc
-            if netloc in ALLOWED_DOMAINS or any(netloc.endswith("." + d) for d in ALLOWED_DOMAINS):
-                return href
+            return href
     return ""
 
 
@@ -93,55 +87,6 @@ class SearchResult:
     pcode: str
     product_name: str
     url: str
-
-
-def _fetch_product_title(pcode: str) -> str | None:
-    """상세 페이지 <title>에서 용량 포함 전체 상품명을 추출한다.
-
-    <title> 태그가 나올 때까지만 읽어 네트워크 비용을 줄인다.
-    """
-    try:
-        resp = requests.get(
-            f"{PRODUCT_BASE}{pcode}",
-            headers=DEFAULT_HEADERS,
-            timeout=REQUEST_TIMEOUT,
-            stream=True,
-        )
-        resp.raise_for_status()
-        buf = b""
-        for chunk in resp.iter_content(chunk_size=4096):
-            buf += chunk
-            if b"</title>" in buf:
-                resp.close()
-                break
-        text = buf.decode("utf-8", errors="ignore")
-    except requests.RequestException:
-        return None
-
-    m = re.search(r"<title>(.+?)</title>", text, re.DOTALL)
-    if not m:
-        return None
-    name = m.group(1).strip()
-    return re.sub(r"\s*:\s*다나와.*$", "", name).strip()
-
-
-def enrich_names_from_detail(results: list[SearchResult]) -> list[SearchResult]:
-    """검색 결과 상품명을 상세 페이지 title로 교체해 용량 정보를 포함시킨다.
-
-    병렬 fetch로 지연을 최소화한다.
-    """
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        pcode_to_future = {r.pcode: executor.submit(_fetch_product_title, r.pcode) for r in results}
-        enriched: dict[str, str] = {}
-        for pcode, future in pcode_to_future.items():
-            title = future.result()
-            if title:
-                enriched[pcode] = title
-
-    return [
-        SearchResult(pcode=r.pcode, product_name=enriched.get(r.pcode, r.product_name), url=r.url)
-        for r in results
-    ]
 
 
 MAX_SEARCH_PAGES = 5
@@ -261,6 +206,32 @@ class DanawaCrawler(BaseCrawler):
         finally:
             cur.close()
 
+    def _find_target_price(
+        self, html: str, target: dict, crawled_at: datetime
+    ) -> RawCrawledPrice | None:
+        """검색 결과에서 pcode 가 일치하는 상품을 찾는다.
+
+        crawled_at 은 회차 시각을 그대로 받는다 — 여기서 now() 를 다시 부르면
+        같은 회차인데 상품마다 수집 시각이 달라진다.
+        """
+        for item in BeautifulSoup(html, "html.parser").select("li.prod_item"):
+            if not _is_real_product(item):
+                continue
+            if _extract_pcode(item) != target["pcode"]:
+                continue
+            name = _extract_name(item)
+            price_text = _extract_price_text(item)
+            if name is None or price_text is None:
+                return None
+            return RawCrawledPrice(
+                site=self.site_name, category=target["category"],
+                product_name=name, price_text=price_text,
+                brand=target["brand"],
+                url=_extract_url(item) or f"{PRODUCT_BASE}{target['pcode']}",
+                crawled_at=crawled_at,
+            )
+        return None
+
     def crawl_raw(self) -> list[RawCrawledPrice]:
         """Raw 데이터 수집 — WATCHLIST 기반."""
         targets = self._load_watch_products()
@@ -273,28 +244,16 @@ class DanawaCrawler(BaseCrawler):
         for target in targets:
             url = f"{SEARCH_URL}?query={target['query']}&tab=goods"
             html = self._fetch_with_retry(url)
-            if html is None:
+            raw = self._find_target_price(html, target, now) if html is not None else None
+            if raw is None:
+                # fallback 이 없으므로 검색 실패가 곧 그 상품의 수집 실패다.
+                # 조용히 넘기면 워치리스트가 커졌을 때 부분 실패를 알 수 없다.
+                logger.warning(
+                    "[%s] 대상 미발견: %s (pcode=%s)",
+                    self.site_name, target["query"], target["pcode"],
+                )
                 continue
-            soup = BeautifulSoup(html, "html.parser")
-
-            for item in soup.select("li.prod_item"):
-                if not _is_real_product(item):
-                    continue
-                pcode = _extract_pcode(item)
-                if pcode != target["pcode"]:
-                    continue
-                name = _extract_name(item)
-                price_text = _extract_price_text(item)
-                if name is None or price_text is None:
-                    break
-                product_url = _extract_url(item) or f"{PRODUCT_BASE}{target['pcode']}"
-                all_raw.append(RawCrawledPrice(
-                    site="danawa", category=target["category"],
-                    product_name=name, price_text=price_text,
-                    brand=target["brand"], url=product_url,
-                    crawled_at=now,
-                ))
-                break
+            all_raw.append(raw)
 
         logger.info("Crawled %d raw prices from %s", len(all_raw), self.site_name)
         return all_raw
