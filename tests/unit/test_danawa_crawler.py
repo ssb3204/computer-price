@@ -63,14 +63,24 @@ class TestHelperExtraction:
         item = _first_item(_product_li("19627934"))
         assert _extract_pcode(item) == "19627934"
 
-    def test_pcode_from_href_when_id_not_product_item(self):
-        """id 가 productItem* 형식이 아니면 링크의 pcode= 로 폴백한다."""
+    def test_pcode_none_when_id_not_product_item(self):
+        """id 가 productItem* 형식이 아니면 pcode 를 뽑지 않는다.
+
+        id 를 숫자만으로 둔 건 의도적이다 — startswith 가드를 지우면
+        removeprefix 가 no-op 이라 이 값이 그대로 pcode 로 통과해버린다.
+        링크에 pcode= 가 있어도 거기서 뽑지 않는다(폴백 없음).
+        """
         html = (
-            '<li class="prod_item" id="somethingElse">'
+            '<li class="prod_item" id="12345678">'
             '  <div class="prod_name"><a href="/info/?pcode=12345678">이름</a></div>'
             "</li>"
         )
-        assert _extract_pcode(_first_item(html)) == "12345678"
+        assert _extract_pcode(_first_item(html)) is None
+
+    def test_pcode_none_when_id_suffix_not_numeric(self):
+        """productItem 뒤가 숫자가 아니면 pcode 가 아니다."""
+        html = '<li class="prod_item" id="productItemAbc"></li>'
+        assert _extract_pcode(_first_item(html)) is None
 
     def test_name_and_price_text(self):
         item = _first_item(_product_li("111", name="AMD 라이젠 7800X3D", price="450,000원"))

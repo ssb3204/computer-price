@@ -28,18 +28,16 @@ def _is_real_product(item: Tag) -> bool:
 
 
 def _extract_pcode(item: Tag) -> str | None:
-    """Extract numeric pcode from a li.prod_item element."""
-    item_id = item.get("id", "")
-    if isinstance(item_id, str) and item_id.startswith("productItem"):
-        code = item_id.removeprefix("productItem")
-        return code if code.isdigit() else None
+    """li.prod_item 의 id(productItem<숫자>)에서 pcode 를 뽑는다.
 
-    link = item.select_one(".prod_name a[href]")
-    if link:
-        match = re.search(r"pcode=(\d+)", link.get("href", ""))
-        if match:
-            return match.group(1)
-    return None
+    호출부는 모두 _is_real_product 로 id 형식을 먼저 거르므로 여기 오는 item 은
+    항상 productItem* 이다.
+    """
+    item_id = item.get("id", "")
+    if not isinstance(item_id, str) or not item_id.startswith("productItem"):
+        return None
+    code = item_id.removeprefix("productItem")
+    return code if code.isdigit() else None
 
 
 def _extract_name(item: Tag) -> str | None:
