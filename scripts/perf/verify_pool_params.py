@@ -16,10 +16,10 @@
 import threading
 import time
 
+from dbutils.pooled_db import PooledDB
+
 from src.common.config import MySQLSettings
 from src.common.mysql_client import create_connection
-
-from dbutils.pooled_db import PooledDB
 
 SETTINGS = MySQLSettings()
 _mon = create_connection(SETTINGS)
