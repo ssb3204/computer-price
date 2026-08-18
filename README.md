@@ -21,11 +21,25 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
 
 ## 크롤링 대상
 
-| 사이트 | URL | 코드명 |
-|--------|-----|--------|
-| 다나와 | danawa.com | `danawa` |
-| 컴퓨존 | compuzone.co.kr | `compuzone` |
-| 견적왕 | kjwwang.com | `pc_estimate` |
+| 사이트 | URL | `site` 코드 | 크롤러 모듈 |
+|--------|-----|------------|------------|
+| 다나와 | danawa.com | `danawa` | `src/crawlers/danawa.py` |
+| 컴퓨존 | compuzone.co.kr | `compuzone` | `src/crawlers/compuzone.py` |
+| 견적왕 | kjwwang.com | `kjwwang` | `src/crawlers/pc_estimate.py` |
+
+견적왕만 모듈명(`pc_estimate`)과 `site` 코드(`kjwwang`)가 다르다. DB에 저장되는 값은
+`kjwwang` 이다 — 모듈명을 코드로 쓰지 말 것.
+
+### `site` 값의 어휘가 테이블마다 다르다
+
+| 테이블 | `site` 값 | 예 |
+|--------|----------|-----|
+| `raw_crawled_prices`, `stg_products` | **영문 코드** | `danawa` / `compuzone` / `kjwwang` |
+| `stg_watchlist` | **한글 표기** | `다나와` / `컴퓨존` / `견적왕` |
+
+워치리스트는 사용자가 화면에서 고르는 값이라 한글로 통일돼 있고, 크롤링 결과는
+크롤러가 넣는 값이라 영문 코드다. 두 테이블을 조인할 때 `site` 로 직접 매칭하면 안 된다
+(대상 매칭은 사이트 고유 ID — pcode/ProductNo/pd_no — 로 한다).
 
 ## 기술 스택
 
@@ -163,10 +177,42 @@ pip install -e ".[dev]"
 
 # 유닛 테스트
 python -m pytest tests/unit/ -v -o "addopts="
-
-# 통합 테스트 (실제 MySQL 연결 필요 — .env 의 접속 정보 사용)
-python -m pytest tests/integration/ -v -o "addopts=" -m integration
 ```
 
-CI 에서는 통합 테스트용 MySQL 8.0 컨테이너를 러너 안에 띄우고 `mysql/ddl/` 을
-적용해서 돌린다. 운영 DB 는 건드리지 않는다.
+### ⚠ 통합 테스트는 일회용 MySQL 에 돌린다
+
+`tests/integration/` 은 `.env` 의 접속 정보를 그대로 쓴다. `.env` 가 운영 DB(Oracle Cloud VM)를
+가리키는 상태에서 실행하면 **운영 DB 에 붙는다.**
+
+정리 픽스처(`conftest.py`)가 지우는 것은 `IT_TEST_` 접두사 행뿐이라 실데이터가 삭제되지는 않는다.
+문제는 삭제가 아니라 **쓰기**다 — 테스트가 `transform_staging()` / `aggregate_analytics()` /
+`detect_changes()` 를 직접 호출하는데, 이 함수들은 테스트 행만이 아니라 **미처리 상태인 실제 행
+전부**를 대상으로 돈다. 멱등이라 데이터가 깨지지는 않지만 운영 데이터의 처리 상태가 바뀌고,
+정리 픽스처는 그것을 되돌리지 않는다.
+
+CI 와 같은 방식으로 일회용 MySQL 을 띄워서 돌린다:
+
+```bash
+docker run -d --name it_mysql -e MYSQL_ROOT_PASSWORD=it_root_pw \
+  -e MYSQL_DATABASE=computer_price -p 3307:3306 mysql:8.0
+
+docker exec -i it_mysql mysql -u root -pit_root_pw <<'SQL'
+CREATE USER IF NOT EXISTS 'price_app'@'%' IDENTIFIED BY 'it_app_pw';
+GRANT ALL PRIVILEGES ON `computer_price`.* TO 'price_app'@'%';
+SQL
+
+for f in mysql/ddl/schema.sql mysql/ddl/users.sql mysql/ddl/user_watchlist.sql mysql/ddl/builds.sql; do
+  docker exec -i it_mysql mysql -u price_app -pit_app_pw computer_price < "$f"
+done
+
+MYSQL_HOST=127.0.0.1 MYSQL_PORT=3307 MYSQL_USER=price_app \
+MYSQL_PASSWORD=it_app_pw MYSQL_DATABASE=computer_price \
+  python -m pytest tests/integration/ -v -o "addopts=" -m integration
+
+docker rm -f it_mysql
+```
+
+환경변수가 `.env` 보다 우선하므로(`pydantic-settings`) 위 명령은 `.env` 를 고치지 않아도 된다.
+
+CI 도 같은 구조다 — 러너 안에 MySQL 8.0 service 컨테이너를 띄우고 `mysql/ddl/` 을 적용해서
+돌리므로 운영 DB 를 건드리지 않는다.
