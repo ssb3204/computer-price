@@ -19,6 +19,11 @@ services:
       MYSQL_USER: ${MYSQL_USER:-price_app}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}   # .env 의 MYSQL_PASSWORD 를 주입
       MYSQL_DATABASE: ${MYSQL_DATABASE:-computer_price}
+      # 커넥션 풀 최대 크기(=maxcached). 20 은 부하 측정으로 정한 값 — scripts/perf/RESULTS.md
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      # 기동 시 미리 열 커넥션 수. 개설이 1개당 350ms 직렬이라 이 값이 곧 기동 지연이다.
+      # 부하 측정 시에는 DB_POOL_SIZE 와 같게 둘 것 (부하 중 확장이 곡선을 오염시킨다).
+      DB_POOL_MIN_CACHED: ${DB_POOL_MIN_CACHED:-5}
     extra_hosts:
       # host.docker.internal 이름을 호스트 게이트웨이로 매핑.
       # Docker Desktop(Windows/Mac)은 기본 제공하지만, 명시해두면 환경 무관하게 안전.

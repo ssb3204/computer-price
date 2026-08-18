@@ -34,6 +34,9 @@ htmlcov/
 # Docker
 postgres_data/
 
+# 부하 측정 — locust stdout 덤프. 같은 내용이 out/*.csv 에 들어 있다
+scripts/perf/out/*.log
+
 # OS
 .DS_Store
 Thumbs.db

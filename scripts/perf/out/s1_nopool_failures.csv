@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,s1 /builds,LocustBadStatusCode(code=500),13,2026-08-17T11:47:18Z,2026-08-17T11:47:36Z
