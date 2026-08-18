@@ -20,6 +20,14 @@
 - **트레이드오프**: GitHub Actions 러너가 로컬 DB에 접근 불가해 자동 스케줄링이 미해결 과제로 남음 (CLAUDE.md 참고)
 - 구 Snowflake DDL은 `docs/legacy/snowflake_ddl/`에 보관 (참고용, 더 이상 실행 대상 아님)
 
+### GitHub Actions → VM cron (2026-08-18)
+- **이전 방식**: `.github/workflows/crawl.yml` 이 러너에서 `run_pipeline.py` 실행. Oracle Cloud VM 의 MySQL 에 인터넷으로 접속(3306 인바운드 `0.0.0.0/0`)
+- **변경 이유**: 두 가지가 겹쳤다. ① 측정 문서에 VM 호스트 IP 가 공개 저장소로 올라간 대응으로 3306 을 가정용 회선 `/32` 로 좁히면서 러너가 접속 불가가 됐다. ② 점검 중 **컴퓨존이 러너 IP 에서 차단**돼 4회 중 3회 0건이던 것이 드러났다(워크플로우는 전부 `success` 로 끝나 안 보였다)
+- **결과**: VM 의 crontab 으로 이관(`0 1,6,15,20`, UTC=KST 10/15/00/05시). 코드는 `~/price-pipeline`, Python 3.11 + venv, MySQL 은 `127.0.0.1`. `crawl.yml` 삭제, GitHub Secrets 5개 삭제. Actions 는 CI 전용
+- **트레이드오프**: **총 수집량은 늘지 않았다**(러너 4~5건 → VM 3건, 대상 9건). 사이트마다 차단 대역이 달라 컴퓨존은 복구됐지만 견적왕이 Oracle 대역에서 403 이 됐고 다나와도 불안정해졌다. Actions UI 의 실행 이력을 잃어 **감시 수단이 0** 이 됐다(`~/crawl.log` 가 유일). 이관의 정당성은 수집량이 아니라 "러너가 MySQL 에 붙을 수 없다"는 제약에 있다
+- **기각한 대안**: GitHub IP 대역 허용(수천 CIDR — Security List 상한 초과), VM self-hosted 러너(RAM 956Mi 에 스왑 이미 333Mi 사용 중 — 상주 러너 얹으면 OOM), `0.0.0.0/0` 복원(원인 되돌리기 + 컴퓨존 차단은 그대로)
+- 상세 근거·실측표는 [adr_20260818_crawl_scheduling_relocation.md](adr_20260818_crawl_scheduling_relocation.md)
+
 ---
 
 ## 데이터 설계
