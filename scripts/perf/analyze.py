@@ -23,7 +23,7 @@ import sys
 
 def main() -> None:
     path = sys.argv[1]
-    pool = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+    pool = int(sys.argv[2]) if len(sys.argv) > 2 else 20  # DB_POOL_SIZE 기본값과 맞춘다
     hold = (float(sys.argv[3]) if len(sys.argv) > 3 else 55.0) / 1000
     base = (float(sys.argv[4]) if len(sys.argv) > 4 else 50.0) / 1000
 

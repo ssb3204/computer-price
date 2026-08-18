@@ -35,7 +35,7 @@ GIL 에 묶이는 CPU 작업이라 DB 대기와 성격이 정반대고, 쓰기�
     PERF_SHAPE=1        계단 활성. 없으면 -u/-r/-t 로 수동 지정
     PERF_STAGE_SEC      계단 1칸 길이(초), 기본 30
     PERF_STAGE_USERS    계단 동시 사용자 목록, 기본 1,5,10,20,40,80,160
-    PERF_BUILD_ID       s2 가 쓸 조합 id, 기본 401
+    PERF_BUILD_ID       s2 가 쓸 조합 id. 없으면 `/builds` 첫 항목을 자동으로 쓴다
 
 주의: LoadTestShape 가 정의돼 있으면 -u/-r/-t 를 덮어쓴다. 그래서 PERF_SHAPE 로
       클래스 정의 자체를 켜고 끈다 — 스모크와 계단을 같은 파일로 쓰기 위함.
@@ -45,6 +45,7 @@ GIL 에 묶이는 CPU 작업이라 DB 대기와 성격이 정반대고, 쓰기�
 
 import os
 
+from gevent.lock import Semaphore
 from locust import FastHttpUser, LoadTestShape, constant, tag, task
 
 # 계단 1칸 길이(초). 짧으면 램프업 과도상태가 평균에 섞이고, 길면 총 시간이 늘어난다.
@@ -54,8 +55,34 @@ STAGE_SEC = int(os.getenv("PERF_STAGE_SEC", "30"))
 # DB 경로에서는 상한을 2~4 × 풀크기로 두면 충분하다 — 그 이상은 큐만 깊어지고 시간만 쓴다.
 STAGE_USERS = tuple(int(u) for u in os.getenv("PERF_STAGE_USERS", "1,5,10,20,40,80,160").split(","))
 
-# s2 대상 조합. 401 = 항목 4개, 442 = 항목 2개 (둘 다 RTT 3회라 N+1 은 없다)
-BUILD_ID = int(os.getenv("PERF_BUILD_ID", "401"))
+# s2 대상 조합. 특정 id 를 기본값으로 박아두지 않는다 — 그 id 는 측정에 쓴 DB 에만
+# 있는 실 데이터라, 다른 환경에서 돌리면 s2 가 통째로 404 를 측정하게 된다.
+# 지정하지 않으면 s2 가 처음 돌 때 `/builds` 첫 항목으로 정한다.
+BUILD_ID_ENV = os.getenv("PERF_BUILD_ID")
+
+_build_id: int | None = None
+_build_id_lock = Semaphore()  # 그린렛 다수가 동시에 첫 s2 를 시작해도 조회는 1회만
+
+
+def resolve_build_id(client) -> int:
+    """s2 가 두드릴 조합 id 를 한 번만 정하고 이후 재사용한다."""
+    global _build_id
+    with _build_id_lock:
+        if _build_id is not None:
+            return _build_id
+        if BUILD_ID_ENV:
+            _build_id = int(BUILD_ID_ENV)
+            return _build_id
+        # 이 조회는 s2 첫 호출에서 1회만 일어난다. s0/s1 만 돌릴 때는 아예 실행되지
+        # 않으므로 대조군 측정을 오염시키지 않는다.
+        builds = client.get("/builds", name="(setup) /builds").json()
+        if not builds:
+            raise RuntimeError(
+                "/builds 가 비어 있어 s2 대상을 정할 수 없다. "
+                "조합을 하나 만들거나 PERF_BUILD_ID 를 지정할 것."
+            )
+        _build_id = int(builds[0]["build_id"])
+        return _build_id
 
 
 class PerfUser(FastHttpUser):
@@ -80,7 +107,8 @@ class PerfUser(FastHttpUser):
     @task
     def price_trend(self) -> None:
         """쿼리 다수 + 총액 추이 집계. 점유시간이 길어 같은 풀로 처리량이 낮아야 한다."""
-        self.client.get(f"/builds/{BUILD_ID}/price-trend", name="s2 /builds/{id}/price-trend")
+        build_id = resolve_build_id(self.client)
+        self.client.get(f"/builds/{build_id}/price-trend", name="s2 /builds/{id}/price-trend")
 
 
 if os.getenv("PERF_SHAPE") == "1":
