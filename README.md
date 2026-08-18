@@ -5,7 +5,7 @@
 ## 아키텍처
 
 ```
-GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
+Oracle Cloud VM 의 cron (하루 4회: 00:00/05:00/10:00/15:00 KST)
     │
     └── run_pipeline.py
            ├── Step 1: 크롤링 (다나와, 컴퓨존, 견적왕)
@@ -41,12 +41,55 @@ GitHub Actions (하루 4회: 00:00/05:00/10:00/15:00 KST)
 크롤러가 넣는 값이라 영문 코드다. 두 테이블을 조인할 때 `site` 로 직접 매칭하면 안 된다
 (대상 매칭은 사이트 고유 ID — pcode/ProductNo/pd_no — 로 한다).
 
+### ⚠ 사이트마다 차단하는 IP 대역이 다르다
+
+크롤링을 어디서 돌리느냐에 따라 수집되는 사이트가 달라진다. 같은 코드·같은 헤더로
+출발지만 바꿔 실측한 결과다(2026-08-18).
+
+| 출발지 | 다나와 | 컴퓨존 | 견적왕 |
+|--------|:------:|:------:|:------:|
+| GitHub Actions 러너 | 부분 | **0건** | 정상 |
+| Oracle Cloud VM | 부분 | 정상 | **403 Forbidden** |
+| 가정용 회선 | — | — | 정상 |
+
+**어느 한 곳에서도 3사를 모두 수집할 수 없다.** 크롤링이 0건일 때 셀렉터나 요청 계약을
+의심하기 전에 **출발지 IP를 먼저 의심할 것.**
+
+견적왕은 토큰 요청(`product_search.html`)부터 403이라 검색 자체가 시작되지 않는다.
+VM 의 공인 IP 를 재할당해도 같은 대역(`161.33.0.0/16`)이 나와 동일하게 차단됐다.
+크롤러는 그대로 두었다 — 파이프라인은 `실패: 1개 사이트` 로 기록하고 나머지를 정상
+처리하며, 차단이 풀리면 코드 수정 없이 자동으로 다시 수집된다.
+
+## 크롤링 스케줄 (VM cron)
+
+Oracle Cloud VM 에서 cron 으로 돈다. GitHub Actions 는 쓰지 않는다 — 러너가 컴퓨존에
+차단되고, VM MySQL 의 3306 을 외부에 열어야 하기 때문이다.
+
+```
+0 1,6,15,20 * * * cd /home/ubuntu/price-pipeline && .venv/bin/python run_pipeline.py >> /home/ubuntu/crawl.log 2>&1
+```
+
+VM 시간대가 `Etc/UTC` 이므로 위 UTC 시각이 곧 KST 10/15/00/05시다.
+
+**`cd` 를 빼면 안 된다.** `src/common/config.py` 의 `env_file=".env"` 가 상대경로라
+현재 디렉토리가 다르면 `.env` 를 못 찾고 기본값(`localhost`)으로 조용히 떨어진다.
+cron 은 홈 디렉토리에서 실행되므로 `cd` 없이는 매번 실패한다.
+
+| 항목 | 값 |
+|------|-----|
+| 코드 위치 | `~/price-pipeline` (이 리포의 clone) |
+| Python | 3.11 (deadsnakes PPA) + venv |
+| MySQL 접속 | `127.0.0.1:3306` — 같은 VM 안이라 커넥션 개설이 350ms → 수 ms |
+| 로그 | `~/crawl.log` |
+
+MySQL compose 는 별도 디렉토리(`~/computer_price`)에 있다. 이름이 비슷하니 헷갈리지 말 것.
+
 ## 기술 스택
 
 | 레이어 | 기술 |
 |--------|------|
 | 크롤링 | Python, BeautifulSoup |
-| 오케스트레이션 | GitHub Actions (하루 4회) |
+| 오케스트레이션 | Oracle Cloud VM 의 cron (하루 4회) |
 | DWH | MySQL 8.0 (Oracle Cloud VM 상시가동, 단일 DB `computer_price`, 3-Layer: 테이블 접두사 raw_/stg_/ans_) |
 | 웹 | FastAPI + 정적 HTML |
 | 인프라 | Docker Compose (api 단일 서비스) |
@@ -99,7 +142,7 @@ computer_price/
 ├── tests/
 │   ├── unit/            # 크롤러 유닛 테스트
 │   └── integration/     # 로컬 MySQL 통합 테스트
-├── .github/workflows/   # CI (린트+유닛+통합 테스트), 크롤링 스케줄
+├── .github/workflows/   # CI (린트+유닛+통합 테스트)
 ├── run_pipeline.py      # 파이프라인 진입점 (6단계 + 품질 검증)
 └── docker-compose.yml
 ```

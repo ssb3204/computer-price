@@ -12,7 +12,9 @@
 
 ## 기술 스택
 - Python 3.11+, BeautifulSoup (크롤링)
-- GitHub Actions (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일 — 동작 중)
+- Oracle Cloud VM 의 cron (오케스트레이션, 00:00/05:00/10:00/15:00 KST 4회/일 — 동작 중).
+  코드는 VM 의 `~/price-pipeline`, 로그는 `~/crawl.log`. GitHub Actions 는 CI 전용이다
+  (2026-08-18 이관 — 러너가 컴퓨존에 차단되고 3306 을 외부에 열어야 해서)
 - DWH: MySQL 8.0 (Oracle Cloud VM 상시가동, 단일 DB `computer_price`, 3-Layer는 테이블 접두사 raw_/stg_/ans_ 방식)
 - FastAPI + 정적 HTML (웹 UI: 로그인/회원가입/마이페이지/워치리스트)
 - Docker Compose (1개 서비스: api)
@@ -94,7 +96,12 @@ run_pipeline.py      # 파이프라인 전체 실행 진입점
   (product_id, crawled_at)이라 하위 시계열·일별 집계가 어긋난다.
 - 크롤러 진단: python scripts/diagnose_compuzone.py [--all-paths] [--save-html]
   — 0건일 때 원인이 요청 계약/셀렉터/스캔 범위 중 무엇인지 구분해준다.
-  단 로컬에서는 항상 통과한다(운영 실패는 GitHub Actions IP 차단 성격).
+  단 로컬에서는 항상 통과한다 — 0건의 원인이 코드가 아니라 출발지 IP 차단이기 때문이다.
+- 사이트마다 차단하는 IP 대역이 다르다(2026-08-18 실측). 컴퓨존은 GitHub Actions 러너를
+  막고, 견적왕은 Oracle Cloud 대역을 막는다(토큰 요청부터 403). 가정용 회선은 셋 다 된다.
+  어느 한 곳에서도 3사를 다 수집할 수 없다 — **0건이면 셀렉터·요청 계약보다 출발지 IP 를
+  먼저 의심할 것.** 견적왕 크롤러는 일부러 그대로 두었다: 파이프라인이 막히지 않고
+  (`실패: 1개 사이트` 로 기록 후 나머지 적재), 차단이 풀리면 자동으로 다시 수집된다
 - Frozen dataclass로 모든 DTO 정의
 - DB 접속: src/common/mysql_client.py의 get_connection 사용, 드라이버는 pymysql.
   접속 계정은 .env의 price_app만 사용 — root 금지. 새 추상화 계층(ABC/팩토리)을 만들지 않는다.
