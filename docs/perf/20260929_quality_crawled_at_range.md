@@ -3,6 +3,7 @@
 - **상태**: 적용 (2026-09-29)
 - **대상 파일**: `src/pipeline/quality.py` (3곳), `mysql/ddl/schema.sql` (인덱스 1개)
 - **관련 테스트**: `tests/integration/test_quality_date_boundary.py`
+- **측정 원자료**: [20260929_quality_crawled_at_range_measurements.md](20260929_quality_crawled_at_range_measurements.md) — perf 스키마에서 잰 `EXPLAIN ANALYZE` 원문 (raw·stg 각각 변경 전·후 3회)
 
 ---
 
@@ -133,9 +134,12 @@ ALTER TABLE `raw_crawled_prices` ADD KEY `idx_raw_crawled_at` (`crawled_at`);
 
 ## 부록 — 이 저장소에서 확인한 것
 
-§3 의 수치는 별도 측정 환경(약 351만 행)의 값이다. 현재 개발 DB 는 1,233행뿐이라
-같은 수치가 재현되지 않는다(데이터가 작아 옵티마이저가 두 형태 모두 index scan 을 고른다).
-이 저장소에서 확인한 것은 다음 세 가지다.
+§3 의 수치는 perf 스키마(약 351만 행)에서 잰 값이고, `EXPLAIN ANALYZE` 원문은
+[20260929_quality_crawled_at_range_measurements.md](20260929_quality_crawled_at_range_measurements.md)
+에 raw·stg 각각 변경 전·후 3회씩 남긴다.
+
+현재 개발 DB 는 1,233행뿐이라 같은 수치가 재현되지 않는다(데이터가 작아 옵티마이저가
+두 형태 모두 index scan 을 고른다). 이 저장소에서 확인한 것은 다음 세 가지다.
 
 1. **결과 동등성** — 교체 전/후 쿼리의 `COUNT(*)` 가 동일 (raw·stg 모두 6건)
 2. **`filtered` 개선** — `EXPLAIN` 의 `filtered` 가 `100.0` → `11.11` 로 바뀌어,
