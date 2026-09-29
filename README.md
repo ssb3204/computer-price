@@ -75,6 +75,18 @@ VM 시간대가 `Etc/UTC` 이므로 위 UTC 시각이 곧 KST 10/15/00/05시다.
 현재 디렉토리가 다르면 `.env` 를 못 찾고 기본값(`localhost`)으로 조용히 떨어진다.
 cron 은 홈 디렉토리에서 실행되므로 `cd` 없이는 매번 실패한다.
 
+### 주 1회 전체 점검 (예시 — 아직 등록하지 않았다)
+
+Staging 변환은 평소 최근 7일 수집분만 본다(`INCREMENTAL_WINDOW_DAYS`). 수집이 그보다
+오래 멈춰 창 밖으로 밀려난 raw 행을 회수하려면 `--full` 로 주기적으로 한 번 더 돌린다.
+
+```
+0 3 * * 1 cd /home/ubuntu/price-pipeline && .venv/bin/python run_pipeline.py --full >> /home/ubuntu/crawl.log 2>&1
+```
+
+월요일 03:00 UTC(= 12:00 KST) — 위 4회 크롤링과 겹치지 않는 시각이다.
+배경은 [docs/perf/20260929_transform_incremental_window.md](docs/perf/20260929_transform_incremental_window.md).
+
 | 항목 | 값 |
 |------|-----|
 | 코드 위치 | `~/price-pipeline` (이 리포의 clone) |
