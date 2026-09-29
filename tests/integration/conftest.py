@@ -1,5 +1,7 @@
 """Integration test fixtures — 실제 로컬 MySQL 접속 필요."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from dotenv import load_dotenv
 
@@ -9,6 +11,15 @@ from src.common.mysql_client import get_connection
 load_dotenv()
 
 TEST_PREFIX = "IT_TEST_"
+
+# transform.py 의 증분 창(INCREMENTAL_WINDOW_DAYS) 안쪽 시각.
+# 창 밖(예: 2000-01-01)을 쓰면 일반 실행의 변환 대상이 아니라 통합 테스트가 전부 0건이 된다.
+# 호출마다 now() 를 부르면 raw 자연키(site, category, product_name, crawled_at)가 매번
+# 달라져 멱등성 테스트가 깨지므로 모듈 로드 시 한 번만 정한다.
+# 일별 집계·LAG 를 보는 테스트가 있어 두 시각은 날짜가 서로 달라야 한다.
+_NOON_TODAY = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+RECENT_T1 = _NOON_TODAY - timedelta(days=2)
+RECENT_T2 = _NOON_TODAY - timedelta(days=1)
 
 
 def _cleanup(settings: MySQLSettings) -> None:

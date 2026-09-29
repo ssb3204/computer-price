@@ -1,13 +1,13 @@
 """Integration test: transform_staging() — Staging 변환 검증."""
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
 from run_pipeline import load_raw, transform_staging
 from src.common.models import RawCrawledPrice
-from tests.integration.conftest import TEST_PREFIX
+from tests.integration.conftest import RECENT_T1, RECENT_T2, TEST_PREFIX
 from tests.integration.test_load_raw import _make_raw
 
 
@@ -79,8 +79,8 @@ def test_transform_staging_maps_case_variant_name(mysql_settings, mysql_conn):
     # raw의 UNIQUE도 ai_ci이므로 crawled_at을 달리해야 두 행이 모두 적재된다
     # (사이트가 회차 사이에 표기를 바꾼 상황을 재현).
     load_raw(mysql_settings, [
-        _make_raw_at(name_a, datetime(2000, 1, 1, tzinfo=UTC)),
-        _make_raw_at(name_b, datetime(2000, 1, 2, tzinfo=UTC)),
+        _make_raw_at(name_a, RECENT_T1),
+        _make_raw_at(name_b, RECENT_T2),
     ])
 
     count = transform_staging(mysql_settings)

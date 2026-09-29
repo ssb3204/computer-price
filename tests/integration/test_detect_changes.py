@@ -1,12 +1,12 @@
 """Integration test: detect_changes() — 가격 변동 감지 검증."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
 from run_pipeline import detect_changes, load_raw, transform_staging
 from src.common.models import RawCrawledPrice
-from tests.integration.conftest import TEST_PREFIX
+from tests.integration.conftest import RECENT_T1, RECENT_T2, TEST_PREFIX
 
 
 def _make_raw_at(name: str, price: str, crawled_at: datetime) -> RawCrawledPrice:
@@ -21,8 +21,8 @@ def _make_raw_at(name: str, price: str, crawled_at: datetime) -> RawCrawledPrice
     )
 
 
-T1 = datetime(2000, 1, 1, tzinfo=UTC)
-T2 = datetime(2000, 1, 2, tzinfo=UTC)
+T1 = RECENT_T1
+T2 = RECENT_T2
 
 
 @pytest.mark.integration
