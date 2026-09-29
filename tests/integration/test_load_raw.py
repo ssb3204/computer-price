@@ -1,12 +1,10 @@
 """Integration test: load_raw() — raw_crawled_prices 적재 검증."""
 
-from datetime import UTC, datetime
-
 import pytest
 
 from run_pipeline import load_raw
 from src.common.models import RawCrawledPrice
-from tests.integration.conftest import TEST_PREFIX
+from tests.integration.conftest import RECENT_T1, TEST_PREFIX
 
 
 def _make_raw(name: str, price: str = "100,000원") -> RawCrawledPrice:
@@ -17,7 +15,7 @@ def _make_raw(name: str, price: str = "100,000원") -> RawCrawledPrice:
         price_text=price,
         brand="테스트브랜드",
         url="https://example.com",
-        crawled_at=datetime(2000, 1, 1, tzinfo=UTC),
+        crawled_at=RECENT_T1,
     )
 
 

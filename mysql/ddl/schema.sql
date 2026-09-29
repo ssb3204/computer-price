@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS `raw_crawled_prices` (
     `crawled_at`   DATETIME      NOT NULL,                     -- UTC
     `loaded_at`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uq_raw_crawled` (`site`, `category`, `product_name`, `crawled_at`)
+    UNIQUE KEY `uq_raw_crawled` (`site`, `category`, `product_name`, `crawled_at`),
+    -- crawled_at 단독 인덱스. uq_raw_crawled 는 crawled_at 이 4번째 키 파트라
+    -- 시각 범위 조건에 쓸 수 없다(skip scan 은 선행 키 파트 1개까지만 건너뛴다).
+    -- 사용처: quality.py 의 '오늘' 범위 조건, transform.py 증분 쿼리의 최근 7일 조건.
+    -- 기존 DB 에는 ALTER 로 별도 반영해야 한다(운영 VM 미반영, 2026-09-29 기준):
+    --   ALTER TABLE `raw_crawled_prices` ADD KEY `idx_raw_crawled_at` (`crawled_at`);
+    KEY `idx_raw_crawled_at` (`crawled_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- transform 파싱/이상치 실패 감사(append-only). transform.py가 INSERT.
@@ -73,6 +79,17 @@ CREATE TABLE IF NOT EXISTS `stg_price_history` (
     `crawled_at` DATETIME NOT NULL,                            -- UTC
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_price_history` (`product_id`, `crawled_at`),  -- §7-2 확정: 신규 추가
+    -- transform.py 증분 조회의 anti-join(h.raw_id = r.id) 대상. 없으면 미처리 행을
+    -- 찾을 때마다 이 테이블 전체를 해시 조인해야 한다(perf 실측 844ms → 58.3ms).
+    -- UNIQUE 로 둬서 같은 raw 행이 두 번 적재되는 것도 함께 막는다.
+    -- raw_id 는 NULL 허용이고 UNIQUE 는 NULL 을 중복으로 보지 않으므로,
+    -- 아직 추적값이 없는 과거 행이 있어도 제약에 걸리지 않는다.
+    -- 기존 DB 에는 ALTER 로 별도 반영해야 한다(운영 VM 미반영, 2026-09-29 기준).
+    -- 반영 전 중복부터 확인할 것 — 한 건이라도 있으면 ALTER 가 1062 로 실패한다:
+    --   SELECT `raw_id`, COUNT(*) FROM `stg_price_history`
+    --    WHERE `raw_id` IS NOT NULL GROUP BY `raw_id` HAVING COUNT(*) > 1;
+    --   ALTER TABLE `stg_price_history` ADD UNIQUE KEY `uq_price_history_raw_id` (`raw_id`);
+    UNIQUE KEY `uq_price_history_raw_id` (`raw_id`),
     CONSTRAINT `fk_price_history_product`
         FOREIGN KEY (`product_id`) REFERENCES `stg_products` (`product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

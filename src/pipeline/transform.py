@@ -9,6 +9,11 @@ from src.crawlers.parser_utils import parse_korean_price, validate_price
 
 logger = logging.getLogger(__name__)
 
+# 증분 조회가 거슬러 올라가는 기간(일). 매 실행 raw 전체를 훑지 않도록 자르되,
+# 수집이 며칠 멈췄다가 재개돼도 그 사이 행을 놓치지 않을 만큼 여유를 둔다.
+# 이 창을 넘겨 늦게 들어온 행은 주 1회 전체 점검(full_scan=True)이 잡는다.
+INCREMENTAL_WINDOW_DAYS = 7
+
 # 크롤러 내부 site_name → 표시명 매핑
 _SITE_DISPLAY_MAP = {
     "danawa":      "다나와",
@@ -17,7 +22,7 @@ _SITE_DISPLAY_MAP = {
 }
 
 
-def transform_staging(settings: MySQLSettings) -> int:
+def transform_staging(settings: MySQLSettings, full_scan: bool = False) -> int:
     """미처리 raw_crawled_prices를 정제해 stg_products / stg_price_history에 적재.
 
     증분 처리(구 Snowflake Stream 대체):
@@ -26,17 +31,33 @@ def transform_staging(settings: MySQLSettings) -> int:
         → 성공 레코드는 price_history.raw_id로, 실패 레코드는 transform_failures로
           '소비'되어 다음 실행에서 재조회되지 않는다(Stream의 consume-once 재현).
     실패 레코드는 raw_transform_failures에 원인과 함께 기록(감사용).
+
+    조회 범위:
+        기본은 최근 INCREMENTAL_WINDOW_DAYS일 이내에 수집된 행만 본다. 미처리 행은
+        시간이 지나도 계속 미처리로 남으므로, 창이 없으면 매 실행 raw 전체를 훑게 된다.
+        대신 창 밖으로 밀려난 행은 영영 처리되지 않으므로, full_scan=True로 창 없이
+        전체를 훑는 점검 실행을 주기적으로 돌려 보완한다(run_pipeline.py --full).
+
+    Args:
+        full_scan: True면 시각 하한 없이 미처리 행 전체를 대상으로 한다.
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
 
-        # 미처리 조인: price_history에도 transform_failures에도 없는 raw 행만
-        cur.execute("""
+        # 미처리 조인: price_history에도 transform_failures에도 없는 raw 행만.
+        # 시각 하한은 모듈 상수(int)라 f-string 보간해도 외부 입력이 섞이지 않는다.
+        window_clause = (
+            ""
+            if full_scan
+            else f"AND r.`crawled_at` >= UTC_TIMESTAMP() - INTERVAL {INCREMENTAL_WINDOW_DAYS} DAY"
+        )
+        cur.execute(f"""
             SELECT r.`id`, r.`site`, r.`category`, r.`product_name`,
                    r.`price_text`, r.`url`, r.`crawled_at`
             FROM `raw_crawled_prices` r
             LEFT JOIN `stg_price_history` h ON h.`raw_id` = r.`id`
             WHERE h.`raw_id` IS NULL
+              {window_clause}
               AND NOT EXISTS (
                   SELECT 1 FROM `raw_transform_failures` f
                   WHERE f.`crawled_prices_id` = r.`id`
@@ -44,8 +65,10 @@ def transform_staging(settings: MySQLSettings) -> int:
         """)
         raw_rows = cur.fetchall()
 
+        scope = "전체 점검" if full_scan else f"최근 {INCREMENTAL_WINDOW_DAYS}일"
+
         if not raw_rows:
-            logger.info("[Staging] 변환할 데이터 없음")
+            logger.info("[Staging] 변환할 데이터 없음 (%s)", scope)
             cur.close()
             return 0
 
@@ -133,5 +156,5 @@ def transform_staging(settings: MySQLSettings) -> int:
 
         cur.close()
 
-    logger.info("[Staging] %d건 변환 완료", len(daily_rows) if daily_rows else 0)
+    logger.info("[Staging] %d건 변환 완료 (%s)", len(daily_rows) if daily_rows else 0, scope)
     return len(daily_rows) if daily_rows else 0
