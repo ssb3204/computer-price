@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS `raw_crawled_prices` (
     `crawled_at`   DATETIME      NOT NULL,                     -- UTC
     `loaded_at`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uq_raw_crawled` (`site`, `category`, `product_name`, `crawled_at`)
+    UNIQUE KEY `uq_raw_crawled` (`site`, `category`, `product_name`, `crawled_at`),
+    -- crawled_at 단독 인덱스. uq_raw_crawled 는 crawled_at 이 4번째 키 파트라
+    -- 시각 범위 조건에 쓸 수 없다(skip scan 은 선행 키 파트 1개까지만 건너뛴다).
+    -- 사용처: quality.py 의 '오늘' 범위 조건, transform.py 증분 쿼리의 최근 7일 조건.
+    -- 기존 DB 에는 ALTER 로 별도 반영해야 한다(운영 VM 미반영, 2026-09-29 기준):
+    --   ALTER TABLE `raw_crawled_prices` ADD KEY `idx_raw_crawled_at` (`crawled_at`);
+    KEY `idx_raw_crawled_at` (`crawled_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- transform 파싱/이상치 실패 감사(append-only). transform.py가 INSERT.

@@ -51,11 +51,16 @@ def check_cross_site_prices(settings: MySQLSettings) -> int:
     """
     with get_connection(settings) as conn:
         cur = conn.cursor()
+        # 오늘 범위를 DATE(crawled_at) = UTC_DATE() 로 쓰면 컬럼이 함수에 감싸여
+        # 인덱스를 못 탄다(sargable 하지 않음). 반열린 구간 [오늘, 내일)로 쓰면
+        # crawled_at 인덱스의 range scan 이 된다. 경계는 자정 00:00:00 포함,
+        # 다음날 00:00:00 제외 — DATE() 비교와 결과 집합이 동일하다.
         cur.execute("""
             SELECT p.`product_name`, p.`site`, ph.`price`
             FROM `stg_price_history` ph
             JOIN `stg_products` p ON p.`product_id` = ph.`product_id`
-            WHERE DATE(ph.`crawled_at`) = UTC_DATE()
+            WHERE ph.`crawled_at` >= UTC_DATE()
+              AND ph.`crawled_at` < UTC_DATE() + INTERVAL 1 DAY
         """)
         rows = cur.fetchall()
         cur.close()
@@ -109,12 +114,15 @@ def check_layer_consistency(settings: MySQLSettings) -> LayerConsistencyResult:
         cur = conn.cursor()
 
         # 1. 오늘 Raw vs Staging 건수
+        # 반열린 구간 [오늘, 내일) — 이유는 check_cross_site_prices 의 주석 참고.
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM `raw_crawled_prices`
-                 WHERE DATE(`crawled_at`) = UTC_DATE()) AS raw_count,
+                 WHERE `crawled_at` >= UTC_DATE()
+                   AND `crawled_at` < UTC_DATE() + INTERVAL 1 DAY) AS raw_count,
                 (SELECT COUNT(*) FROM `stg_price_history`
-                 WHERE DATE(`crawled_at`) = UTC_DATE()) AS staging_count
+                 WHERE `crawled_at` >= UTC_DATE()
+                   AND `crawled_at` < UTC_DATE() + INTERVAL 1 DAY) AS staging_count
         """)
         row = cur.fetchone()
         raw_count, staging_count = int(row[0]), int(row[1])
